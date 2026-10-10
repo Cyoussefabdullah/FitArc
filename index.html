@@ -415,7 +415,7 @@ async function renderCheckinTab(content, clientId, driveLink){
       <div class="card" style="text-align:center;" dir="rtl">
         <h3>آخر متابعة اتسجلت ✓</h3>
         <p>الوزن: ${fmtNum(k.weight)} كيلو · النوم: ${fmtNum(k.sleepHours)} ساعة · الخطوات: ${fmtNum(k.steps)}</p>
-        <p class="field-hint">تم إرسالها، ومش ممكن تتعدل. تقدر تبعت المتابعة الجاية ابتداءً من ${fmtDate(res.nextAvailableDate)}.</p>
+        <p class="field-hint">ابعت المتابعة الجاية لما تخلص الأسبوع ده، عشان يتفتحلك الأسبوع اللي بعده.</p>
       </div>
     `));
     return;
@@ -655,13 +655,8 @@ async function renderClientWorkoutTab(content, clientId){
     content.appendChild(el(`<p class="field-hint" style="margin-top:-8px;">🔒 Submit this week's check-in (in the Check-in tab) to unlock next week's workout log.</p>`));
   }
 
-  if (all.warmup && all.warmup.items && all.warmup.items.length){
-    content.appendChild(buildWarmupSection(all.warmup));
-  }
-
-  if (all.cardio && all.cardio.length){
-    content.appendChild(buildCardioSection(all.cardio));
-  }
+  const planSectionsWrap = el(`<div></div>`);
+  content.appendChild(planSectionsWrap);
 
   const exWrap = el(`<div class="stack"></div>`);
   content.appendChild(exWrap);
@@ -672,15 +667,21 @@ async function renderClientWorkoutTab(content, clientId){
   const progressWrap = el(`<div class="stack" style="margin-top:10px;" hidden></div>`);
   content.appendChild(progressWrap);
 
+  function planForWeek(weekNum){
+    return (all.plansByWeek && all.plansByWeek[weekNum]) || { exercises: all.exercises, warmup: all.warmup, cardio: all.cardio, isCustom: false };
+  }
+
   function renderProgress(){
     progressWrap.innerHTML = '';
-    all.exercises.forEach((ex, i) => {
+    all.exercises.forEach((ex) => {
       const setsPoints = [];
       for (let s = 0; s < ex.setsCount; s++){
         const points = [];
         for (let w = 1; w <= all.totalWeeks; w++){
+          const weekPlan = planForWeek(w);
+          const idx = weekPlan ? weekPlan.exercises.findIndex(e => e.name === ex.name) : -1;
           const log = all.logsByWeek[w];
-          const setData = (log && log[i] && log[i].sets[s]) ? log[i].sets[s] : null;
+          const setData = (idx !== -1 && log && log[idx] && log[idx].sets[s]) ? log[idx].sets[s] : null;
           points.push({week: w, weight: setData ? setData.weight : null, reps: setData ? setData.reps : null});
         }
         setsPoints.push(points);
@@ -694,10 +695,18 @@ async function renderClientWorkoutTab(content, clientId){
     progressToggleBtn.textContent = (progressWrap.hidden ? 'Show' : 'Hide') + ' Progress';
   });
 
+  function renderPlanSections(wk){
+    planSectionsWrap.innerHTML = '';
+    if (wk.warmup && wk.warmup.items && wk.warmup.items.length) planSectionsWrap.appendChild(buildWarmupSection(wk.warmup));
+    if (wk.cardio && wk.cardio.length) planSectionsWrap.appendChild(buildCardioSection(wk.cardio));
+  }
+
   function loadWeek(weekNum){
+    const wk = planForWeek(weekNum);
+    renderPlanSections(wk);
     exWrap.innerHTML = '';
     const log = all.logsByWeek[weekNum];
-    all.exercises.forEach((ex, i) => {
+    wk.exercises.forEach((ex, i) => {
       const sets = (log && log[i]) ? log[i].sets : Array.from({length: ex.setsCount}, () => ({weight:'', reps:''}));
       const existingNote = (log && log[i] && log[i].note) || '';
       const videoBtnHtml = buildVideoButtonsHtml(ex);
@@ -983,12 +992,14 @@ async function renderClientDetail(pw, clientId){
   const content = wrap.querySelector('#admin-tab-content');
   const tabs = { checkin: wrap.querySelector('#t-checkin'), workout: wrap.querySelector('#t-workout'), diet: wrap.querySelector('#t-diet'), sub: wrap.querySelector('#t-sub') };
   function activate(key){ Object.values(tabs).forEach(b => b.classList.remove('active')); tabs[key].classList.add('active'); }
-  async function refreshWorkoutTab(){
+  async function refreshWorkoutTab(weekNumber){
     // re-fetch totalWeeks (it may have changed via add/remove month) and
     // re-render the workout tab in place, instead of resetting the whole
-    // client-detail page back to the "checkin" tab.
+    // client-detail page back to the "checkin" tab. weekNumber (optional)
+    // keeps the coach on the week they were just editing instead of
+    // always jumping back to Week 1.
     const fresh = await api('getClientDetail', {password: pw, clientId});
-    if (fresh.ok){ c.totalWeeks = fresh.totalWeeks; renderWorkoutAdminTab(content, pw, clientId, fresh.totalWeeks, refreshWorkoutTab); }
+    if (fresh.ok){ c.totalWeeks = fresh.totalWeeks; renderWorkoutAdminTab(content, pw, clientId, fresh.totalWeeks, refreshWorkoutTab, weekNumber); }
   }
   tabs.checkin.addEventListener('click', () => { activate('checkin'); renderAssessmentCheckinTab(content, pw, clientId); });
   tabs.workout.addEventListener('click', () => { activate('workout'); renderWorkoutAdminTab(content, pw, clientId, c.totalWeeks, refreshWorkoutTab); });
@@ -1083,56 +1094,70 @@ async function renderAssessmentCheckinTab(content, pw, clientId){
 }
 
 // ---- tab: workout plan + weekly log + progression ----
-async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefresh){
+async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefresh, initialWeek){
   content.innerHTML = '';
   content.appendChild(el(`<div class="center-screen" style="min-height:160px;"><div class="spinner"></div></div>`));
   let week1;
   try{ week1 = await api('getWorkoutWeekAdmin', {password: pw, clientId, weekNumber: 1}); }
-  catch(err){ return renderConnectionError(() => renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefresh)); }
+  catch(err){ return renderConnectionError(() => renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefresh, initialWeek)); }
   content.innerHTML = '';
 
-  content.appendChild(el(`
-    <div class="row" style="justify-content:space-between;margin-bottom:10px;">
-      <button class="btn btn-outline btn-sm" id="edit-plan-btn">Edit Workout Plan</button>
+  // keep the coach on the week they were just viewing/editing across a
+  // refresh (e.g. right after saving a specific week's plan), instead of
+  // always jumping back to Week 1.
+  let currentWeek = (initialWeek && initialWeek >= 1 && initialWeek <= totalWeeks) ? initialWeek : 1;
+  let weekCache = { 1: week1 };
+
+  const topRow = el(`
+    <div class="row" style="justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+      <div class="row" style="gap:8px;">
+        <button class="btn btn-outline btn-sm" id="edit-plan-btn">Edit Week ${currentWeek} Plan</button>
+        <button class="btn btn-outline btn-sm" id="reset-plan-btn" style="color:var(--danger);border-color:var(--danger);" hidden>Reset to Week 1 Plan</button>
+      </div>
       <div class="row">
         <button class="btn btn-outline btn-sm" id="add-month-btn">+ Month (4 weeks)</button>
         <button class="btn btn-outline btn-sm" id="remove-month-btn" style="color:var(--danger);border-color:var(--danger);">- Month</button>
       </div>
     </div>
-  `));
-  content.querySelector('#edit-plan-btn').addEventListener('click', () => openWorkoutPlanEditor(pw, clientId, week1.exercises, week1.warmup, week1.cardio, onRefresh));
-  content.querySelector('#add-month-btn').addEventListener('click', async () => {
-    const r = await api('addMonth', {password: pw, clientId});
-    if (r.ok) onRefresh();
+  `);
+  content.appendChild(topRow);
+  const editPlanBtn = topRow.querySelector('#edit-plan-btn');
+  const resetPlanBtn = topRow.querySelector('#reset-plan-btn');
+  editPlanBtn.addEventListener('click', () => {
+    const wk = weekCache[currentWeek];
+    openWorkoutPlanEditor(pw, clientId, currentWeek, wk.exercises, wk.warmup, wk.cardio, () => onRefresh(currentWeek));
   });
-  content.querySelector('#remove-month-btn').addEventListener('click', async () => {
+  resetPlanBtn.addEventListener('click', async () => {
+    if (!confirm(`This will delete the custom plan for Week ${currentWeek} and go back to Week 1's plan. Are you sure?`)) return;
+    const r = await api('resetWorkoutPlanWeek', {password: pw, clientId, weekNumber: currentWeek});
+    if (r.ok){ weekCache[currentWeek] = { ...r, data: (weekCache[currentWeek] && weekCache[currentWeek].data) || [] }; loadWeek(currentWeek); }
+  });
+  topRow.querySelector('#add-month-btn').addEventListener('click', async () => {
+    const r = await api('addMonth', {password: pw, clientId});
+    if (r.ok) onRefresh(currentWeek);
+  });
+  topRow.querySelector('#remove-month-btn').addEventListener('click', async () => {
     if (!confirm('This will delete the last 4 weeks and any logged data in them. Are you sure?')) return;
     const r = await api('removeMonth', {password: pw, clientId});
-    if (r.ok) onRefresh();
+    if (r.ok) onRefresh(currentWeek);
     else alert(r.error === 'cannot_remove_last_weeks' ? 'Cannot remove all weeks.' : 'Something went wrong.');
   });
 
   if (!week1.exercises.length){
-    content.appendChild(el(`<div class="card"><p>No workout plan for this client yet. Click "Edit Workout Plan" to get started.</p></div>`));
+    content.appendChild(el(`<div class="card"><p>No workout plan for this client yet. Click "Edit Week 1 Plan" to get started.</p></div>`));
     return;
   }
 
-  let currentWeek = 1;
   const weekTabsWrap = el(`<div class="week-tabs"></div>`);
   for (let w = 1; w <= totalWeeks; w++){
-    const b = el(`<button type="button" class="week-tab${w===1?' active':''}">Week ${w}</button>`);
+    const b = el(`<button type="button" class="week-tab${w===currentWeek?' active':''}">Week ${w}</button>`);
     b.addEventListener('click', () => { currentWeek = w; weekTabsWrap.querySelectorAll('.week-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); loadWeek(w); });
     weekTabsWrap.appendChild(b);
   }
   content.appendChild(weekTabsWrap);
 
-  if (week1.warmup.items.length){
-    content.appendChild(buildWarmupSection(week1.warmup));
-  }
-
-  if (week1.cardio.length){
-    content.appendChild(buildCardioSection(week1.cardio));
-  }
+  const planSectionsWrap = el(`<div></div>`);
+  content.appendChild(planSectionsWrap);
 
   const exWrap = el(`<div class="stack"></div>`);
   content.appendChild(exWrap);
@@ -1143,19 +1168,20 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
   const progressWrap = el(`<div class="stack" style="margin-top:10px;" hidden></div>`);
   content.appendChild(progressWrap);
 
-  let weekCache = { 1: week1 };
   let progressLoaded = false;
   async function renderProgress(){
     progressWrap.innerHTML = '<div class="spinner"></div>';
     const all = await api('getClientWorkoutAll', {password: pw, clientId});
     progressWrap.innerHTML = '';
-    all.exercises.forEach((ex, i) => {
+    all.exercises.forEach((ex) => {
       const setsPoints = [];
       for (let s = 0; s < ex.setsCount; s++){
         const points = [];
         for (let w = 1; w <= all.totalWeeks; w++){
+          const weekPlan = all.plansByWeek && all.plansByWeek[w];
+          const idx = weekPlan ? weekPlan.exercises.findIndex(e => e.name === ex.name) : -1;
           const log = all.logsByWeek[w];
-          const setData = (log && log[i] && log[i].sets[s]) ? log[i].sets[s] : null;
+          const setData = (idx !== -1 && log && log[idx] && log[idx].sets[s]) ? log[idx].sets[s] : null;
           points.push({week: w, weight: setData ? setData.weight : null, reps: setData ? setData.reps : null});
         }
         setsPoints.push(points);
@@ -1170,10 +1196,19 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
     if (!progressWrap.hidden && !progressLoaded) await renderProgress();
   });
 
+  function renderPlanSections(wk){
+    planSectionsWrap.innerHTML = '';
+    if (wk.warmup.items.length) planSectionsWrap.appendChild(buildWarmupSection(wk.warmup));
+    if (wk.cardio.length) planSectionsWrap.appendChild(buildCardioSection(wk.cardio));
+  }
+
   async function loadWeek(weekNum){
     exWrap.innerHTML = '<div class="spinner"></div>';
     let wk = weekCache[weekNum];
     if (!wk){ wk = await api('getWorkoutWeekAdmin', {password: pw, clientId, weekNumber: weekNum}); weekCache[weekNum] = wk; }
+    editPlanBtn.textContent = `Edit Week ${weekNum} Plan`;
+    resetPlanBtn.hidden = !(weekNum !== 1 && wk.isCustom);
+    renderPlanSections(wk);
     exWrap.innerHTML = '';
     wk.exercises.forEach((ex, i) => {
       const sets = (wk.data[i]) ? wk.data[i].sets : [];
@@ -1202,7 +1237,7 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
       exWrap.appendChild(card);
     });
   }
-  loadWeek(1);
+  loadWeek(currentWeek);
 
   saveBtn.addEventListener('click', async () => {
     const data = [];
@@ -1216,7 +1251,7 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
     saveBtn.disabled = true; saveBtn.textContent = 'Saving...';
     const r = await api('saveWorkoutLog', {password: pw, clientId, weekNumber: currentWeek, data});
     if (r.ok){
-      weekCache[currentWeek] = { exercises: week1.exercises, warmup: week1.warmup, data: r.data };
+      weekCache[currentWeek] = { ...weekCache[currentWeek], data: r.data };
       progressLoaded = false;
       if (!progressWrap.hidden) await renderProgress();
       saveBtn.textContent = 'Saved ✓'; setTimeout(() => { saveBtn.textContent = 'Save'; saveBtn.disabled = false; }, 1200);
@@ -1327,9 +1362,9 @@ function fillRowsFromPlan(warmupRows, exRows, notesEl, plan, cardioRows){
   }
 }
 
-function openWorkoutPlanEditor(pw, clientId, exercises, warmup, cardio, onDone){
+function openWorkoutPlanEditor(pw, clientId, weekNumber, exercises, warmup, cardio, onDone){
   const overlay = openModal(`
-    <h3>Edit Workout Plan</h3>
+    <h3>Edit Week ${weekNumber} Plan</h3>
     <div class="stack-sm" style="margin-bottom:14px;border-bottom:1px solid var(--border);padding-bottom:14px;">
       <div class="field-label">Load from a saved template</div>
       <div class="row">
@@ -1398,7 +1433,7 @@ function openWorkoutPlanEditor(pw, clientId, exercises, warmup, cardio, onDone){
     const newWarmup = { items: readWarmupRows(warmupRows), notes: warmupNotesEl.value };
     const newExercises = readExRows(exRows);
     const newCardio = readCardioRows(cardioRows);
-    const r = await api('saveWorkoutPlan', {password: pw, clientId, exercises: newExercises, warmup: newWarmup, cardio: newCardio});
+    const r = await api('saveWorkoutPlanForWeek', {password: pw, clientId, weekNumber, exercises: newExercises, warmup: newWarmup, cardio: newCardio});
     if (r.ok){ overlay.remove(); onDone(); }
   });
 }
