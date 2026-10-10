@@ -32,15 +32,13 @@ function todayStr() {
   return toDateStr(new Date());
 }
 
-function currentWeekId() {
-  const now = new Date();
-  const date = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
-  const dayNum = date.getUTCDay() || 7;
-  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
-  return date.getUTCFullYear() + '-W' + (weekNo < 10 ? '0' + weekNo : weekNo);
-}
+// Minimum number of days that must pass since a client's last submitted
+// weekly check-in before they're allowed to submit the next one. Deliberately
+// NOT tied to the calendar week (clients' training cycles start on different
+// days and don't all take exactly 7 days) -- this is a floor, not a fixed
+// cadence, so a client who finishes a short cycle can still check in sooner
+// than someone on a longer one, as long as at least this many days passed.
+const MIN_CHECKIN_GAP_DAYS = 3;
 
 async function generateLoginId() {
   for (let i = 0; i < 20; i++) {
@@ -214,6 +212,16 @@ async function getClientAssessment(pw, clientId) {
 
 // ---------- Weekly check-in ----------
 
+async function lastCheckinForClient(clientId) {
+  const rows = await sql`
+    SELECT week_number AS "weekNumber", checkin_date AS "checkinDate",
+           weight, sleep_hours AS "sleepHours", energy, diet, stress_level AS "stressLevel",
+           steps, problems, notes, week_rating AS "weekRating"
+    FROM checkins WHERE client_id = ${clientId} ORDER BY week_number DESC LIMIT 1
+  `;
+  return rows[0] || null;
+}
+
 async function submitCheckin(body) {
   const clientId = body.clientId;
   const c = await getClientRow(clientId);
@@ -224,35 +232,39 @@ async function submitCheckin(body) {
   ) {
     return { ok: false, error: 'missing_fields' };
   }
-  const weekId = currentWeekId();
-  await sql`
+  const last = await lastCheckinForClient(clientId);
+  if (last) {
+    const daysSince = (Date.now() - new Date(last.checkinDate).getTime()) / 86400000;
+    if (daysSince < MIN_CHECKIN_GAP_DAYS) return { ok: false, error: 'too_soon' };
+  }
+  const weekNumber = last ? last.weekNumber + 1 : 1;
+  const inserted = await sql`
     INSERT INTO checkins
-      (client_id, week_id, checkin_date, weight, sleep_hours, energy, diet, stress_level, steps, problems, notes, week_rating)
+      (client_id, week_number, checkin_date, weight, sleep_hours, energy, diet, stress_level, steps, problems, notes, week_rating)
     VALUES
-      (${clientId}, ${weekId}, now(), ${body.weight}, ${body.sleepHours}, ${body.energy},
+      (${clientId}, ${weekNumber}, now(), ${body.weight}, ${body.sleepHours}, ${body.energy},
        ${body.diet}, ${body.stressLevel}, ${body.steps}, ${body.problems || ''}, ${body.notes || ''}, ${body.weekRating})
-    ON CONFLICT (client_id, week_id) DO UPDATE SET
-      weight = EXCLUDED.weight, sleep_hours = EXCLUDED.sleep_hours, energy = EXCLUDED.energy,
-      diet = EXCLUDED.diet, stress_level = EXCLUDED.stress_level, steps = EXCLUDED.steps, problems = EXCLUDED.problems,
-      notes = EXCLUDED.notes, week_rating = EXCLUDED.week_rating, submitted_at = now()
+    ON CONFLICT (client_id, week_number) DO NOTHING
+    RETURNING id
   `;
-  return { ok: true, weekId };
+  if (!inserted.length) return { ok: false, error: 'already_submitted' };
+  return { ok: true, weekNumber };
 }
 
 async function getMyCheckin(clientId) {
   if (!clientId) return { ok: false, error: 'invalid_id' };
-  const weekId = currentWeekId();
-  const rows = await sql`
-    SELECT weight, sleep_hours AS "sleepHours", energy, diet, stress_level AS "stressLevel", steps, problems, notes, week_rating AS "weekRating"
-    FROM checkins WHERE client_id = ${clientId} AND week_id = ${weekId}
-  `;
-  return { ok: true, exists: rows.length > 0, weekId, data: rows[0] || null };
+  const last = await lastCheckinForClient(clientId);
+  if (!last) return { ok: true, exists: false, canSubmit: true, data: null };
+  const daysSince = (Date.now() - new Date(last.checkinDate).getTime()) / 86400000;
+  const canSubmit = daysSince >= MIN_CHECKIN_GAP_DAYS;
+  const nextAvailableDate = addDays(toDateStr(new Date(last.checkinDate)), MIN_CHECKIN_GAP_DAYS);
+  return { ok: true, exists: true, canSubmit, nextAvailableDate, data: last };
 }
 
 async function listCheckins(pw) {
   if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
   const rows = await sql`
-    SELECT c.client_id AS "clientId", cl.name, c.week_id AS "weekId", c.weight,
+    SELECT c.client_id AS "clientId", cl.name, c.week_number AS "weekNumber", c.weight,
            c.sleep_hours AS "sleepHours", c.energy, c.diet, c.stress_level AS "stressLevel", c.steps, c.problems, c.notes,
            c.week_rating AS "weekRating", c.submitted_at AS "submittedAt"
     FROM checkins c JOIN clients cl ON cl.id = c.client_id
