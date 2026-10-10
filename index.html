@@ -628,11 +628,12 @@ async function renderClientWorkoutTab(content, clientId){
   catch(err){ return renderConnectionError(() => renderClientWorkoutTab(content, clientId)); }
   content.innerHTML = '';
   if (!all.ok) return;
-  if (!all.exercises.length){
+  if (!all.days || !all.days.length){
     content.appendChild(el(`<div class="card" style="text-align:center;"><p>Your coach hasn't set up your workout plan yet.</p></div>`));
     return;
   }
   let currentWeek = 1;
+  let currentDay = 0;
   // a client can only open week N once they've submitted (N-1) weekly check-ins --
   // week 1 is always open. This does NOT apply to the coach's admin view (renderWorkoutAdminTab),
   // which always has full access to every week.
@@ -646,7 +647,7 @@ async function renderClientWorkoutTab(content, clientId){
       b.disabled = true;
       b.title = "Submit this week's check-in to unlock the next week";
     } else {
-      b.addEventListener('click', () => { currentWeek = w; weekTabsWrap.querySelectorAll('.week-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); loadWeek(w); });
+      b.addEventListener('click', () => { currentWeek = w; currentDay = 0; weekTabsWrap.querySelectorAll('.week-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); loadWeek(w); });
     }
     weekTabsWrap.appendChild(b);
   }
@@ -654,6 +655,11 @@ async function renderClientWorkoutTab(content, clientId){
   if (unlockedThroughWeek < all.totalWeeks){
     content.appendChild(el(`<p class="field-hint" style="margin-top:-8px;">🔒 Submit this week's check-in (in the Check-in tab) to unlock next week's workout log.</p>`));
   }
+
+  // day tabs nested under the selected week -- which days exist, and what's
+  // in each one, can differ per week since a week's plan can be customized.
+  const dayTabsWrap = el(`<div class="week-tabs" style="margin-top:6px;"></div>`);
+  content.appendChild(dayTabsWrap);
 
   const planSectionsWrap = el(`<div></div>`);
   content.appendChild(planSectionsWrap);
@@ -668,25 +674,35 @@ async function renderClientWorkoutTab(content, clientId){
   content.appendChild(progressWrap);
 
   function planForWeek(weekNum){
-    return (all.plansByWeek && all.plansByWeek[weekNum]) || { exercises: all.exercises, warmup: all.warmup, cardio: all.cardio, isCustom: false };
+    return (all.plansByWeek && all.plansByWeek[weekNum]) || { days: all.days, isCustom: false };
   }
 
   function renderProgress(){
     progressWrap.innerHTML = '';
-    all.exercises.forEach((ex) => {
-      const setsPoints = [];
-      for (let s = 0; s < ex.setsCount; s++){
-        const points = [];
-        for (let w = 1; w <= all.totalWeeks; w++){
-          const weekPlan = planForWeek(w);
-          const idx = weekPlan ? weekPlan.exercises.findIndex(e => e.name === ex.name) : -1;
-          const log = all.logsByWeek[w];
-          const setData = (idx !== -1 && log && log[idx] && log[idx].sets[s]) ? log[idx].sets[s] : null;
-          points.push({week: w, weight: setData ? setData.weight : null, reps: setData ? setData.reps : null});
+    (all.days || []).forEach((baseDay) => {
+      if (!baseDay.exercises.length) return;
+      progressWrap.appendChild(el(`<h3 style="margin:14px 0 4px;">${baseDay.title}</h3>`));
+      baseDay.exercises.forEach((ex) => {
+        const setsPoints = [];
+        for (let s = 0; s < ex.setsCount; s++){
+          const points = [];
+          for (let w = 1; w <= all.totalWeeks; w++){
+            const weekPlan = planForWeek(w);
+            let setData = null;
+            for (let wd = 0; wd < weekPlan.days.length; wd++){
+              const idx = weekPlan.days[wd].exercises.findIndex(e => e.name === ex.name);
+              if (idx !== -1){
+                const log = all.logsByWeek[w] && all.logsByWeek[w][wd];
+                setData = (log && log[idx] && log[idx].sets[s]) ? log[idx].sets[s] : null;
+                break;
+              }
+            }
+            points.push({week: w, weight: setData ? setData.weight : null, reps: setData ? setData.reps : null});
+          }
+          setsPoints.push(points);
         }
-        setsPoints.push(points);
-      }
-      progressWrap.appendChild(buildExerciseProgressCard(ex, setsPoints));
+        progressWrap.appendChild(buildExerciseProgressCard(ex, setsPoints));
+      });
     });
   }
   renderProgress();
@@ -695,20 +711,30 @@ async function renderClientWorkoutTab(content, clientId){
     progressToggleBtn.textContent = (progressWrap.hidden ? 'Show' : 'Hide') + ' Progress';
   });
 
-  function renderPlanSections(wk){
+  function renderPlanSections(day){
     planSectionsWrap.innerHTML = '';
-    if (wk.warmup && wk.warmup.items && wk.warmup.items.length) planSectionsWrap.appendChild(buildWarmupSection(wk.warmup));
-    if (wk.cardio && wk.cardio.length) planSectionsWrap.appendChild(buildCardioSection(wk.cardio));
+    if (day.warmup && day.warmup.items && day.warmup.items.length) planSectionsWrap.appendChild(buildWarmupSection(day.warmup));
+    if (day.cardio && day.cardio.length) planSectionsWrap.appendChild(buildCardioSection(day.cardio));
   }
 
-  function loadWeek(weekNum){
-    const wk = planForWeek(weekNum);
-    renderPlanSections(wk);
+  function renderDayTabs(wk){
+    dayTabsWrap.innerHTML = '';
+    wk.days.forEach((day, i) => {
+      const b = el(`<button type="button" class="week-tab${i===currentDay?' active':''}">${day.title}</button>`);
+      b.addEventListener('click', () => { currentDay = i; dayTabsWrap.querySelectorAll('.week-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); renderDayContent(wk); });
+      dayTabsWrap.appendChild(b);
+    });
+  }
+
+  function renderDayContent(wk){
+    const day = wk.days[currentDay] || wk.days[0];
+    if (!day){ exWrap.innerHTML = ''; planSectionsWrap.innerHTML = ''; return; }
+    renderPlanSections(day);
     exWrap.innerHTML = '';
-    const log = all.logsByWeek[weekNum];
-    wk.exercises.forEach((ex, i) => {
-      const sets = (log && log[i]) ? log[i].sets : Array.from({length: ex.setsCount}, () => ({weight:'', reps:''}));
-      const existingNote = (log && log[i] && log[i].note) || '';
+    const log = (all.logsByWeek[currentWeek] && all.logsByWeek[currentWeek][currentDay]) || [];
+    day.exercises.forEach((ex, i) => {
+      const sets = (log[i]) ? log[i].sets : Array.from({length: ex.setsCount}, () => ({weight:'', reps:''}));
+      const existingNote = (log[i] && log[i].note) || '';
       const videoBtnHtml = buildVideoButtonsHtml(ex);
       const card = el(`
         <div class="ex-card">
@@ -738,6 +764,13 @@ async function renderClientWorkoutTab(content, clientId){
       exWrap.appendChild(card);
     });
   }
+
+  function loadWeek(weekNum){
+    const wk = planForWeek(weekNum);
+    currentDay = Math.min(currentDay, Math.max(0, wk.days.length - 1));
+    renderDayTabs(wk);
+    renderDayContent(wk);
+  }
   loadWeek(1);
 
   saveBtn.addEventListener('click', async () => {
@@ -752,8 +785,13 @@ async function renderClientWorkoutTab(content, clientId){
     });
     saveBtn.disabled = true; saveBtn.textContent = 'Saving...';
     try{
-      const r = await api('logWorkout', {clientId, weekNumber: currentWeek, data});
-      if (r.ok){ all.logsByWeek[currentWeek] = r.data; renderProgress(); saveBtn.textContent = 'Saved ✓'; setTimeout(() => { saveBtn.textContent = 'Save'; saveBtn.disabled = false; }, 1200); }
+      const r = await api('logWorkout', {clientId, weekNumber: currentWeek, dayIndex: currentDay, data});
+      if (r.ok){
+        if (!all.logsByWeek[currentWeek]) all.logsByWeek[currentWeek] = {};
+        all.logsByWeek[currentWeek][currentDay] = r.data;
+        renderProgress();
+        saveBtn.textContent = 'Saved ✓'; setTimeout(() => { saveBtn.textContent = 'Save'; saveBtn.disabled = false; }, 1200);
+      }
       else { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
     } catch(err){ renderConnectionError(() => renderClientWorkoutTab(content, clientId)); }
   });
@@ -1093,7 +1131,7 @@ async function renderAssessmentCheckinTab(content, pw, clientId){
   content.appendChild(checkinsCard);
 }
 
-// ---- tab: workout plan + weekly log + progression ----
+// ---- tab: workout plan (split into training days) + weekly log + progression ----
 async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefresh, initialWeek){
   content.innerHTML = '';
   content.appendChild(el(`<div class="center-screen" style="min-height:160px;"><div class="spinner"></div></div>`));
@@ -1106,6 +1144,7 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
   // refresh (e.g. right after saving a specific week's plan), instead of
   // always jumping back to Week 1.
   let currentWeek = (initialWeek && initialWeek >= 1 && initialWeek <= totalWeeks) ? initialWeek : 1;
+  let currentDay = 0;
   let weekCache = { 1: week1 };
 
   const topRow = el(`
@@ -1125,12 +1164,12 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
   const resetPlanBtn = topRow.querySelector('#reset-plan-btn');
   editPlanBtn.addEventListener('click', () => {
     const wk = weekCache[currentWeek];
-    openWorkoutPlanEditor(pw, clientId, currentWeek, wk.exercises, wk.warmup, wk.cardio, () => onRefresh(currentWeek));
+    openWorkoutPlanEditor(pw, clientId, currentWeek, wk.days, () => onRefresh(currentWeek));
   });
   resetPlanBtn.addEventListener('click', async () => {
     if (!confirm(`This will delete the custom plan for Week ${currentWeek} and go back to Week 1's plan. Are you sure?`)) return;
     const r = await api('resetWorkoutPlanWeek', {password: pw, clientId, weekNumber: currentWeek});
-    if (r.ok){ weekCache[currentWeek] = { ...r, data: (weekCache[currentWeek] && weekCache[currentWeek].data) || [] }; loadWeek(currentWeek); }
+    if (r.ok){ onRefresh(currentWeek); }
   });
   topRow.querySelector('#add-month-btn').addEventListener('click', async () => {
     const r = await api('addMonth', {password: pw, clientId});
@@ -1143,7 +1182,7 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
     else alert(r.error === 'cannot_remove_last_weeks' ? 'Cannot remove all weeks.' : 'Something went wrong.');
   });
 
-  if (!week1.exercises.length){
+  if (!week1.days.length){
     content.appendChild(el(`<div class="card"><p>No workout plan for this client yet. Click "Edit Week 1 Plan" to get started.</p></div>`));
     return;
   }
@@ -1151,10 +1190,15 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
   const weekTabsWrap = el(`<div class="week-tabs"></div>`);
   for (let w = 1; w <= totalWeeks; w++){
     const b = el(`<button type="button" class="week-tab${w===currentWeek?' active':''}">Week ${w}</button>`);
-    b.addEventListener('click', () => { currentWeek = w; weekTabsWrap.querySelectorAll('.week-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); loadWeek(w); });
+    b.addEventListener('click', () => { currentWeek = w; currentDay = 0; weekTabsWrap.querySelectorAll('.week-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); loadWeek(w); });
     weekTabsWrap.appendChild(b);
   }
   content.appendChild(weekTabsWrap);
+
+  // day tabs nested under the selected week -- which days exist, and what's
+  // in each one, can differ per week since a week's plan can be customized.
+  const dayTabsWrap = el(`<div class="week-tabs" style="margin-top:6px;"></div>`);
+  content.appendChild(dayTabsWrap);
 
   const planSectionsWrap = el(`<div></div>`);
   content.appendChild(planSectionsWrap);
@@ -1173,20 +1217,32 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
     progressWrap.innerHTML = '<div class="spinner"></div>';
     const all = await api('getClientWorkoutAll', {password: pw, clientId});
     progressWrap.innerHTML = '';
-    all.exercises.forEach((ex) => {
-      const setsPoints = [];
-      for (let s = 0; s < ex.setsCount; s++){
-        const points = [];
-        for (let w = 1; w <= all.totalWeeks; w++){
-          const weekPlan = all.plansByWeek && all.plansByWeek[w];
-          const idx = weekPlan ? weekPlan.exercises.findIndex(e => e.name === ex.name) : -1;
-          const log = all.logsByWeek[w];
-          const setData = (idx !== -1 && log && log[idx] && log[idx].sets[s]) ? log[idx].sets[s] : null;
-          points.push({week: w, weight: setData ? setData.weight : null, reps: setData ? setData.reps : null});
+    (all.days || []).forEach((baseDay) => {
+      if (!baseDay.exercises.length) return;
+      progressWrap.appendChild(el(`<h3 style="margin:14px 0 4px;">${baseDay.title}</h3>`));
+      baseDay.exercises.forEach((ex) => {
+        const setsPoints = [];
+        for (let s = 0; s < ex.setsCount; s++){
+          const points = [];
+          for (let w = 1; w <= all.totalWeeks; w++){
+            const weekPlan = all.plansByWeek && all.plansByWeek[w];
+            let setData = null;
+            if (weekPlan){
+              for (let wd = 0; wd < weekPlan.days.length; wd++){
+                const idx = weekPlan.days[wd].exercises.findIndex(e => e.name === ex.name);
+                if (idx !== -1){
+                  const log = all.logsByWeek[w] && all.logsByWeek[w][wd];
+                  setData = (log && log[idx] && log[idx].sets[s]) ? log[idx].sets[s] : null;
+                  break;
+                }
+              }
+            }
+            points.push({week: w, weight: setData ? setData.weight : null, reps: setData ? setData.reps : null});
+          }
+          setsPoints.push(points);
         }
-        setsPoints.push(points);
-      }
-      progressWrap.appendChild(buildExerciseProgressCard(ex, setsPoints));
+        progressWrap.appendChild(buildExerciseProgressCard(ex, setsPoints));
+      });
     });
     progressLoaded = true;
   }
@@ -1196,23 +1252,29 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
     if (!progressWrap.hidden && !progressLoaded) await renderProgress();
   });
 
-  function renderPlanSections(wk){
+  function renderPlanSections(day){
     planSectionsWrap.innerHTML = '';
-    if (wk.warmup.items.length) planSectionsWrap.appendChild(buildWarmupSection(wk.warmup));
-    if (wk.cardio.length) planSectionsWrap.appendChild(buildCardioSection(wk.cardio));
+    if (day.warmup.items.length) planSectionsWrap.appendChild(buildWarmupSection(day.warmup));
+    if (day.cardio.length) planSectionsWrap.appendChild(buildCardioSection(day.cardio));
   }
 
-  async function loadWeek(weekNum){
-    exWrap.innerHTML = '<div class="spinner"></div>';
-    let wk = weekCache[weekNum];
-    if (!wk){ wk = await api('getWorkoutWeekAdmin', {password: pw, clientId, weekNumber: weekNum}); weekCache[weekNum] = wk; }
-    editPlanBtn.textContent = `Edit Week ${weekNum} Plan`;
-    resetPlanBtn.hidden = !(weekNum !== 1 && wk.isCustom);
-    renderPlanSections(wk);
+  function renderDayTabs(wk){
+    dayTabsWrap.innerHTML = '';
+    wk.days.forEach((day, i) => {
+      const b = el(`<button type="button" class="week-tab${i===currentDay?' active':''}">${day.title}</button>`);
+      b.addEventListener('click', () => { currentDay = i; dayTabsWrap.querySelectorAll('.week-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); renderDayContent(wk); });
+      dayTabsWrap.appendChild(b);
+    });
+  }
+
+  function renderDayContent(wk){
+    const day = wk.days[currentDay] || wk.days[0];
+    if (!day){ exWrap.innerHTML = ''; planSectionsWrap.innerHTML = ''; return; }
+    renderPlanSections(day);
     exWrap.innerHTML = '';
-    wk.exercises.forEach((ex, i) => {
-      const sets = (wk.data[i]) ? wk.data[i].sets : [];
-      const existingNote = (wk.data[i] && wk.data[i].note) || '';
+    day.exercises.forEach((ex, i) => {
+      const sets = (day.data[i]) ? day.data[i].sets : [];
+      const existingNote = (day.data[i] && day.data[i].note) || '';
       const videoBtnHtml = buildVideoButtonsHtml(ex);
       const card = el(`
         <div class="ex-card">
@@ -1237,6 +1299,17 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
       exWrap.appendChild(card);
     });
   }
+
+  async function loadWeek(weekNum){
+    exWrap.innerHTML = '<div class="spinner"></div>';
+    let wk = weekCache[weekNum];
+    if (!wk){ wk = await api('getWorkoutWeekAdmin', {password: pw, clientId, weekNumber: weekNum}); weekCache[weekNum] = wk; }
+    editPlanBtn.textContent = `Edit Week ${weekNum} Plan`;
+    resetPlanBtn.hidden = !(weekNum !== 1 && wk.isCustom);
+    currentDay = Math.min(currentDay, Math.max(0, wk.days.length - 1));
+    renderDayTabs(wk);
+    renderDayContent(wk);
+  }
   loadWeek(currentWeek);
 
   saveBtn.addEventListener('click', async () => {
@@ -1249,9 +1322,10 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
       data.push({ sets, note: card.dataset.note || '' });
     });
     saveBtn.disabled = true; saveBtn.textContent = 'Saving...';
-    const r = await api('saveWorkoutLog', {password: pw, clientId, weekNumber: currentWeek, data});
+    const r = await api('saveWorkoutLog', {password: pw, clientId, weekNumber: currentWeek, dayIndex: currentDay, data});
     if (r.ok){
-      weekCache[currentWeek] = { ...weekCache[currentWeek], data: r.data };
+      const wk = weekCache[currentWeek];
+      if (wk && wk.days[currentDay]) wk.days[currentDay] = { ...wk.days[currentDay], data: r.data };
       progressLoaded = false;
       if (!progressWrap.hidden) await renderProgress();
       saveBtn.textContent = 'Saved ✓'; setTimeout(() => { saveBtn.textContent = 'Save'; saveBtn.disabled = false; }, 1200);
@@ -1345,24 +1419,70 @@ function readExRows(container){
   });
   return out;
 }
-function fillRowsFromPlan(warmupRows, exRows, notesEl, plan, cardioRows){
-  warmupRows.innerHTML = '';
-  exRows.innerHTML = '';
-  const warmupItems = (plan.warmup && plan.warmup.items) || [];
-  (warmupItems.length ? warmupItems : []).forEach(w => buildWarmupRow(warmupRows, w));
-  (plan.exercises && plan.exercises.length ? plan.exercises : []).forEach(ex => buildExRow(exRows, ex));
+// ---- shared "workout day" block (one training day's warm-up + cardio +
+// exercises) -- used by both the per-week plan editor and the template
+// editor, since a template IS the same day-split shape as a week's plan.
+function buildWorkoutDayBlock(daysWrap, day){
+  const block = el(`
+    <div class="stack-sm workout-day-block" style="border:1px solid var(--border);border-radius:10px;padding:12px;">
+      <div class="row" style="align-items:center;">
+        <input type="text" class="d-title" placeholder="Day name (Day 1)" value="${(day && day.title) || ''}" style="flex:2;">
+        <button type="button" class="icon-btn remove-day">×</button>
+      </div>
+      <div class="stack-sm" style="margin-top:10px;">
+        <h3 style="margin:0;">Warm Up</h3><div class="warmup-rows stack-sm"></div>
+        <button type="button" class="btn btn-outline btn-sm add-warmup-row">+ Add Warm-up</button>
+        <div class="stack-sm" style="margin-top:6px;"><div class="field-label">Warm-up notes (optional) — shown to the client</div><textarea class="warmup-notes"></textarea></div>
+      </div>
+      <div class="stack-sm" style="margin-top:16px;">
+        <h3 style="margin:0;">Cardio</h3><div class="cardio-rows stack-sm"></div>
+        <button type="button" class="btn btn-outline btn-sm add-cardio-row">+ Add Cardio</button>
+      </div>
+      <div class="stack-sm" style="margin-top:16px;"><h3>Exercises</h3><div class="ex-rows stack-sm"></div><button type="button" class="btn btn-outline btn-sm add-ex-row">+ Add Exercise</button></div>
+    </div>
+  `);
+  const warmupRows = block.querySelector('.warmup-rows');
+  const exRows = block.querySelector('.ex-rows');
+  const warmupNotesEl = block.querySelector('.warmup-notes');
+  const cardioRows = block.querySelector('.cardio-rows');
+
+  const warmupItems = (day && day.warmup && day.warmup.items) || [];
+  warmupItems.forEach(w => buildWarmupRow(warmupRows, w));
   if (!warmupItems.length) buildWarmupRow(warmupRows);
-  if (!plan.exercises || !plan.exercises.length) buildExRow(exRows);
-  if (notesEl) notesEl.value = (plan.warmup && plan.warmup.notes) || '';
-  if (cardioRows){
-    cardioRows.innerHTML = '';
-    const cardioItems = plan.cardio || [];
-    (cardioItems.length ? cardioItems : []).forEach(c => buildCardioRow(cardioRows, c));
-    if (!cardioItems.length) buildCardioRow(cardioRows);
-  }
+  warmupNotesEl.value = (day && day.warmup && day.warmup.notes) || '';
+
+  const cardioItems = (day && day.cardio) || [];
+  cardioItems.forEach(c => buildCardioRow(cardioRows, c));
+  if (!cardioItems.length) buildCardioRow(cardioRows);
+
+  const exItems = (day && day.exercises) || [];
+  exItems.forEach(ex => buildExRow(exRows, ex));
+  if (!exItems.length) buildExRow(exRows);
+
+  block.querySelector('.add-warmup-row').addEventListener('click', () => buildWarmupRow(warmupRows));
+  block.querySelector('.add-cardio-row').addEventListener('click', () => buildCardioRow(cardioRows));
+  block.querySelector('.add-ex-row').addEventListener('click', () => buildExRow(exRows));
+  block.querySelector('.remove-day').addEventListener('click', () => block.remove());
+  daysWrap.appendChild(block);
+  return block;
 }
 
-function openWorkoutPlanEditor(pw, clientId, weekNumber, exercises, warmup, cardio, onDone){
+function readWorkoutDays(daysWrap){
+  const out = [];
+  daysWrap.querySelectorAll('.workout-day-block').forEach(block => {
+    const title = block.querySelector('.d-title').value;
+    if (!title) return;
+    out.push({
+      title,
+      exercises: readExRows(block.querySelector('.ex-rows')),
+      warmup: { items: readWarmupRows(block.querySelector('.warmup-rows')), notes: block.querySelector('.warmup-notes').value },
+      cardio: readCardioRows(block.querySelector('.cardio-rows')),
+    });
+  });
+  return out;
+}
+
+function openWorkoutPlanEditor(pw, clientId, weekNumber, days, onDone){
   const overlay = openModal(`
     <h3>Edit Week ${weekNumber} Plan</h3>
     <div class="stack-sm" style="margin-bottom:14px;border-bottom:1px solid var(--border);padding-bottom:14px;">
@@ -1372,41 +1492,20 @@ function openWorkoutPlanEditor(pw, clientId, weekNumber, exercises, warmup, card
         <button type="button" class="btn btn-outline btn-sm" id="load-template-btn">Load</button>
       </div>
     </div>
-    <div class="stack-sm">
-      <h3 style="margin-top:0;">Warm Up</h3><div id="warmup-rows" class="stack-sm"></div>
-      <button type="button" class="btn btn-outline btn-sm" id="add-warmup-row">+ Add Warm-up</button>
-      <div class="stack-sm" style="margin-top:6px;"><div class="field-label">Warm-up notes (optional) — shown to the client</div><textarea id="warmup-notes"></textarea></div>
-    </div>
-    <div class="stack-sm" style="margin-top:16px;">
-      <h3 style="margin-top:0;">Cardio</h3><div id="cardio-rows" class="stack-sm"></div>
-      <button type="button" class="btn btn-outline btn-sm" id="add-cardio-row">+ Add Cardio</button>
-    </div>
-    <div class="stack-sm" style="margin-top:16px;"><h3>Exercises</h3><div id="ex-rows" class="stack-sm"></div><button type="button" class="btn btn-outline btn-sm" id="add-ex-row">+ Add Exercise</button></div>
+    <div id="days-wrap" class="stack"></div>
+    <button type="button" class="btn btn-outline btn-sm" id="add-day-btn" style="margin-top:10px;">+ Add Day</button>
     <div class="row" style="margin-top:16px;">
       <button class="btn" id="plan-save">Save Plan</button>
       <button class="btn btn-outline" id="save-as-template-btn">Save as Template</button>
       <button class="btn btn-outline" id="plan-cancel">Cancel</button>
     </div>
   `, true);
-  const warmupRows = overlay.querySelector('#warmup-rows');
-  const exRows = overlay.querySelector('#ex-rows');
-  const warmupNotesEl = overlay.querySelector('#warmup-notes');
-  const cardioRows = overlay.querySelector('#cardio-rows');
+  const daysWrap = overlay.querySelector('#days-wrap');
 
-  const warmupItems = (warmup && warmup.items) || [];
-  (warmupItems.length ? warmupItems : []).forEach(w => buildWarmupRow(warmupRows, w));
-  (exercises && exercises.length ? exercises : []).forEach(ex => buildExRow(exRows, ex));
-  if (!warmupItems.length) buildWarmupRow(warmupRows);
-  if (!exercises || !exercises.length) buildExRow(exRows);
-  warmupNotesEl.value = (warmup && warmup.notes) || '';
+  (days && days.length ? days : []).forEach(d => buildWorkoutDayBlock(daysWrap, d));
+  if (!days || !days.length) buildWorkoutDayBlock(daysWrap, {title: 'Day 1'});
 
-  const cardioItems = cardio || [];
-  (cardioItems.length ? cardioItems : []).forEach(c => buildCardioRow(cardioRows, c));
-  if (!cardioItems.length) buildCardioRow(cardioRows);
-
-  overlay.querySelector('#add-warmup-row').addEventListener('click', () => buildWarmupRow(warmupRows));
-  overlay.querySelector('#add-cardio-row').addEventListener('click', () => buildCardioRow(cardioRows));
-  overlay.querySelector('#add-ex-row').addEventListener('click', () => buildExRow(exRows));
+  overlay.querySelector('#add-day-btn').addEventListener('click', () => buildWorkoutDayBlock(daysWrap, {title: `Day ${daysWrap.children.length + 1}`}));
   overlay.querySelector('#plan-cancel').addEventListener('click', () => overlay.remove());
 
   const templateSelect = overlay.querySelector('#load-template-select');
@@ -1421,24 +1520,23 @@ function openWorkoutPlanEditor(pw, clientId, weekNumber, exercises, warmup, card
     const id = Number(templateSelect.value);
     const t = templatesCache.find(x => x.id === id);
     if (!t) return;
-    if (!confirm('Loading this template will replace the rows below with the template\'s exercises and warm-up. Continue?')) return;
-    fillRowsFromPlan(warmupRows, exRows, warmupNotesEl, t, cardioRows);
+    if (!confirm('Loading this template will replace all the days below with the template\'s days. Continue?')) return;
+    daysWrap.innerHTML = '';
+    (t.days && t.days.length ? t.days : [{title: 'Day 1'}]).forEach(d => buildWorkoutDayBlock(daysWrap, d));
   });
 
   overlay.querySelector('#save-as-template-btn').addEventListener('click', () => {
-    openSaveTemplateModal(pw, readExRows(exRows), { items: readWarmupRows(warmupRows), notes: warmupNotesEl.value }, readCardioRows(cardioRows));
+    openSaveTemplateModal(pw, readWorkoutDays(daysWrap));
   });
 
   overlay.querySelector('#plan-save').addEventListener('click', async () => {
-    const newWarmup = { items: readWarmupRows(warmupRows), notes: warmupNotesEl.value };
-    const newExercises = readExRows(exRows);
-    const newCardio = readCardioRows(cardioRows);
-    const r = await api('saveWorkoutPlanForWeek', {password: pw, clientId, weekNumber, exercises: newExercises, warmup: newWarmup, cardio: newCardio});
+    const newDays = readWorkoutDays(daysWrap);
+    const r = await api('saveWorkoutPlanForWeek', {password: pw, clientId, weekNumber, days: newDays});
     if (r.ok){ overlay.remove(); onDone(); }
   });
 }
 
-function openSaveTemplateModal(pw, exercises, warmup, cardio, onDone){
+function openSaveTemplateModal(pw, days, onDone){
   const overlay = openModal(`
     <h3>Save as Template</h3>
     <div class="stack-sm">
@@ -1454,7 +1552,7 @@ function openSaveTemplateModal(pw, exercises, warmup, cardio, onDone){
   overlay.querySelector('#tpl-save-btn').addEventListener('click', async () => {
     const name = overlay.querySelector('#tpl-name').value.trim();
     if (!name) return;
-    const r = await api('saveWorkoutTemplate', {password: pw, name, exercises, warmup, cardio});
+    const r = await api('saveWorkoutTemplate', {password: pw, name, days});
     if (r.ok){ overlay.remove(); if (onDone) onDone(); }
   });
 }
@@ -1500,7 +1598,7 @@ async function renderTemplatesLibrary(pw){
               <button class="btn btn-outline btn-sm delete-tpl-btn" style="color:var(--danger);border-color:var(--danger);">Delete</button>
             </div>
           </div>
-          <p class="field-hint" style="margin:6px 0 0;">${t.exercises.length} exercise(s) · ${t.warmup.items.length} warm-up item(s) · ${t.cardio.length} cardio item(s)</p>
+          <p class="field-hint" style="margin:6px 0 0;">${t.days.length} day(s) · ${t.days.reduce((n,d)=>n+d.exercises.length,0)} exercise(s) total</p>
         </div>
       `);
       card.querySelector('.edit-tpl-btn').addEventListener('click', () => openTemplateEditor(pw, t, reload));
@@ -1519,38 +1617,26 @@ async function renderTemplatesLibrary(pw){
 function openTemplateEditor(pw, template, onDone){
   const overlay = openModal(`
     <h3>${template ? 'Edit Template' : 'New Template'}</h3>
-    <div class="stack-sm"><div class="field-label">Template name</div><input type="text" id="tpl-name" value="${(template && template.name) || ''}"></div>
-    <div class="stack-sm" style="margin-top:14px;">
-      <h3 style="margin-top:0;">Warm Up</h3><div id="warmup-rows" class="stack-sm"></div>
-      <button type="button" class="btn btn-outline btn-sm" id="add-warmup-row">+ Add Warm-up</button>
-      <div class="stack-sm" style="margin-top:6px;"><div class="field-label">Warm-up notes (optional) — shown to the client</div><textarea id="warmup-notes"></textarea></div>
-    </div>
-    <div class="stack-sm" style="margin-top:16px;">
-      <h3 style="margin-top:0;">Cardio</h3><div id="cardio-rows" class="stack-sm"></div>
-      <button type="button" class="btn btn-outline btn-sm" id="add-cardio-row">+ Add Cardio</button>
-    </div>
-    <div class="stack-sm" style="margin-top:16px;"><h3>Exercises</h3><div id="ex-rows" class="stack-sm"></div><button type="button" class="btn btn-outline btn-sm" id="add-ex-row">+ Add Exercise</button></div>
+    <div class="stack-sm" style="margin-bottom:14px;"><div class="field-label">Template name</div><input type="text" id="tpl-name" value="${(template && template.name) || ''}"></div>
+    <div id="days-wrap" class="stack"></div>
+    <button type="button" class="btn btn-outline btn-sm" id="add-day-btn" style="margin-top:10px;">+ Add Day</button>
     <div class="row" style="margin-top:16px;">
       <button class="btn" id="tpl-save-btn">Save Template</button>
       <button class="btn btn-outline" id="tpl-cancel-btn">Cancel</button>
     </div>
   `, true);
-  const warmupRows = overlay.querySelector('#warmup-rows');
-  const exRows = overlay.querySelector('#ex-rows');
-  const warmupNotesEl = overlay.querySelector('#warmup-notes');
-  const cardioRows = overlay.querySelector('#cardio-rows');
-  fillRowsFromPlan(warmupRows, exRows, warmupNotesEl, template || { warmup: { items: [], notes: '' }, exercises: [], cardio: [] }, cardioRows);
-  overlay.querySelector('#add-warmup-row').addEventListener('click', () => buildWarmupRow(warmupRows));
-  overlay.querySelector('#add-cardio-row').addEventListener('click', () => buildCardioRow(cardioRows));
-  overlay.querySelector('#add-ex-row').addEventListener('click', () => buildExRow(exRows));
+  const daysWrap = overlay.querySelector('#days-wrap');
+  const days = (template && template.days) || [];
+  (days.length ? days : []).forEach(d => buildWorkoutDayBlock(daysWrap, d));
+  if (!days.length) buildWorkoutDayBlock(daysWrap, {title: 'Day 1'});
+
+  overlay.querySelector('#add-day-btn').addEventListener('click', () => buildWorkoutDayBlock(daysWrap, {title: `Day ${daysWrap.children.length + 1}`}));
   overlay.querySelector('#tpl-cancel-btn').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#tpl-save-btn').addEventListener('click', async () => {
     const name = overlay.querySelector('#tpl-name').value.trim();
     if (!name) return;
-    const newWarmup = { items: readWarmupRows(warmupRows), notes: warmupNotesEl.value };
-    const newExercises = readExRows(exRows);
-    const newCardio = readCardioRows(cardioRows);
-    const r = await api('saveWorkoutTemplate', {password: pw, templateId: template ? template.id : null, name, exercises: newExercises, warmup: newWarmup, cardio: newCardio});
+    const newDays = readWorkoutDays(daysWrap);
+    const r = await api('saveWorkoutTemplate', {password: pw, templateId: template ? template.id : null, name, days: newDays});
     if (r.ok){ overlay.remove(); onDone(); }
   });
 }
