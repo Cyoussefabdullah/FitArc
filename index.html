@@ -1,0 +1,1642 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>FitArc</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Oswald:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0F1115; --surface:#171A21; --surface-2:#1E222B; --border:#2A2F3A;
+  --text:#EDEFF3; --text-dim:#9AA3B2;
+  --primary:#2563EB; --primary-dim:#1D4ED8;
+  --accent:#3B82F6; --accent-dim:#2563EB;
+  --danger:#FB7185; --warn:#F59E0B; --success:#22C55E;
+  --font-body:'Inter',sans-serif; --font-en:'Oswald',sans-serif;
+  --radius:14px;
+}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.5;}
+.wrap{max-width:720px;margin:0 auto;padding:20px 16px 60px;}
+.wrap.wide{max-width:1100px;}
+.center-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;}
+h1,h2,h3{margin:0 0 8px;}
+h1{font-size:22px;} h2{font-size:18px;} h3{font-size:16px;}
+p{margin:0 0 8px;color:var(--text-dim);}
+a{color:var(--accent);}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px;}
+[hidden]{display:none !important;}
+.stack{display:flex;flex-direction:column;gap:14px;}
+.stack-sm{display:flex;flex-direction:column;gap:6px;}
+.row{display:flex;gap:10px;flex-wrap:wrap;}
+.field-label{font-size:13px;color:var(--text-dim);display:block;margin-bottom:4px;}
+input,textarea,select{
+  width:100%;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;
+  color:var(--text);padding:11px 12px;font-family:inherit;font-size:15px;
+}
+textarea{resize:vertical;min-height:70px;}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--primary);}
+.btn{background:var(--primary);color:#fff;border:none;border-radius:10px;padding:12px 18px;font-size:15px;font-family:inherit;cursor:pointer;font-weight:600;}
+.btn:hover{background:var(--primary-dim);}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text);}
+.btn-outline:hover{border-color:var(--primary);}
+.btn-sm{padding:7px 12px;font-size:13px;}
+.btn-accent{background:var(--accent);}
+.btn-accent:hover{background:var(--accent-dim);}
+.btn-block{width:100%;}
+.spinner{width:34px;height:34px;border-radius:50%;border:3px solid var(--border);border-top-color:var(--primary);animation:spin 0.8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;}
+.topbar h3{margin:0;}
+.pill{display:inline-block;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600;}
+.pill-ok{background:rgba(34,197,94,.15);color:var(--success);}
+.pill-warn{background:rgba(245,158,11,.15);color:var(--warn);}
+.pill-danger{background:rgba(251,113,133,.15);color:var(--danger);}
+.tabs{display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--border);}
+.tab-btn{background:none;border:none;color:var(--text-dim);padding:10px 14px;font-family:inherit;font-size:14px;cursor:pointer;border-bottom:2px solid transparent;}
+.tab-btn.active{color:var(--text);border-bottom-color:var(--primary);font-weight:700;}
+.detail-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:12px;margin:10px 0;}
+.detail-item .num{font-family:var(--font-en);font-size:22px;font-weight:600;}
+.field-hint{font-size:12px;color:var(--text-dim);}
+.scale-row{display:flex;gap:6px;flex-wrap:wrap;}
+.scale-btn{flex:1;min-width:38px;text-align:center;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:9px 4px;cursor:pointer;font-family:var(--font-en);color:var(--text);}
+.scale-btn.sel{background:var(--primary);border-color:var(--primary);color:#fff;}
+.client-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;}
+.client-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;}
+.client-card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
+.client-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px;}
+.modal-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:22px;max-width:480px;width:100%;max-height:90vh;overflow-y:auto;}
+.modal-box-wide{max-width:720px;}
+.ex-card{background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:14px;}
+.ex-card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;}
+.video-link-btn{display:inline-flex;align-items:center;gap:5px;background:var(--primary);color:#fff;border-radius:999px;padding:6px 13px;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;flex-shrink:0;}
+.video-link-btn:hover{background:var(--primary-dim);}
+.set-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+.set-row .set-label{min-width:54px;font-size:13px;color:var(--text-dim);}
+.week-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;}
+.week-tab{background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer;font-family:var(--font-en);color:var(--text);}
+.week-tab.active{background:var(--primary);border-color:var(--primary);color:#fff;}
+.week-tab.locked{opacity:0.45;cursor:not-allowed;}
+.week-tab:disabled{opacity:0.45;cursor:not-allowed;}
+.icon-btn{width:26px;height:26px;border-radius:7px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-dim);cursor:pointer;font-size:14px;line-height:1;}
+.icon-btn:hover{color:var(--text);border-color:var(--primary);}
+.chart-wrap{background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:14px;}
+@media (max-width:480px){ .wrap{padding:14px 12px 48px;} }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const app = document.getElementById('app');
+function el(html){ const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; }
+function fmtNum(n){ if (n === '' || n === null || n === undefined) return '—'; return n; }
+function fmtDate(iso){ if (!iso) return '—'; const d = new Date(iso); if (isNaN(d.getTime())) return '—'; return d.toLocaleDateString('en-US', {day:'numeric', month:'short', year:'numeric'}); }
+
+async function api(action, payload){
+  const res = await fetch('/api/action', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action, ...payload}) });
+  return res.json();
+}
+
+function renderConnectionError(retry){
+  app.innerHTML = '';
+  app.appendChild(el(`
+    <div class="wrap center-screen"><div class="card" style="text-align:center;">
+      <h2>Connection Error</h2><p>Please try again in a moment.</p>
+      <button class="btn" id="retry-btn">Retry</button>
+    </div></div>
+  `));
+  app.querySelector('#retry-btn').addEventListener('click', retry);
+}
+
+// ---------------- routing ----------------
+const params = new URLSearchParams(location.search);
+if (params.get('admin') === '1'){
+  const savedPw = sessionStorage.getItem('oc_admin_pw');
+  if (savedPw) adminLoginAttempt(savedPw);
+  else renderAdminLogin();
+} else {
+  const savedClientId = sessionStorage.getItem('oc_client_id');
+  if (savedClientId) renderClientView(savedClientId);
+  else renderClientLogin();
+}
+
+async function adminLoginAttempt(pw){
+  try{
+    const r = await api('adminLogin', {password: pw});
+    if (r.ok){ sessionStorage.setItem('oc_admin_pw', pw); renderAdminDashboard(pw); }
+    else { sessionStorage.removeItem('oc_admin_pw'); renderAdminLogin(); }
+  } catch(err){ renderConnectionError(() => adminLoginAttempt(pw)); }
+}
+
+// ---------------- client login ----------------
+function renderClientLogin(msg){
+  app.innerHTML = '';
+  app.appendChild(el(`
+    <div class="wrap center-screen"><div class="card" style="max-width:380px;width:100%;">
+      <h2 style="text-align:center;">Log In</h2>
+      ${msg ? `<p style="color:var(--danger);text-align:center;">${msg}</p>` : ''}
+      <div class="stack">
+        <input type="text" inputmode="numeric" id="login-id" maxlength="6">
+        <button class="btn btn-block" id="login-btn">Log In</button>
+      </div>
+    </div></div>
+  `));
+  const btn = app.querySelector('#login-btn');
+  const input = app.querySelector('#login-id');
+  async function doLogin(){
+    const loginId = input.value.trim();
+    if (!loginId){ renderClientLogin('Enter your code first'); return; }
+    btn.disabled = true; btn.textContent = 'Logging in...';
+    try{
+      const r = await api('clientLogin', {loginId});
+      if (r.ok){ sessionStorage.setItem('oc_client_id', r.clientId); renderClientView(r.clientId); }
+      else renderClientLogin('Wrong code, try again');
+    } catch(err){ renderConnectionError(() => renderClientLogin()); }
+  }
+  btn.addEventListener('click', doLogin);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+}
+
+// ---------------- client main view ----------------
+async function renderClientView(clientId){
+  app.innerHTML = '';
+  app.appendChild(el(`<div class="wrap center-screen"><div class="spinner"></div></div>`));
+  let data;
+  try{
+    data = await api('getClientPortal', {clientId});
+    if (!data.ok){ sessionStorage.removeItem('oc_client_id'); return renderClientLogin(); }
+  } catch(err){
+    return renderConnectionError(() => renderClientView(clientId));
+  }
+  if (!data.hasAssessment) return renderAssessmentView(clientId, data.name, data.driveLink);
+  renderClientPortal(clientId, data);
+}
+
+function clientLogout(){ sessionStorage.removeItem('oc_client_id'); renderClientLogin(); }
+
+function subscriptionCard(data){
+  const dClass = data.daysRemaining <= 5 ? 'pill-danger' : (data.daysRemaining <= 10 ? 'pill-warn' : 'pill-ok');
+  return `
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:center;">
+        <h3 style="margin:0;">${data.name}</h3>
+        <span class="pill ${dClass}">${data.daysRemaining > 0 ? data.daysRemaining + ' days left' : 'Subscription expired'}</span>
+      </div>
+      <p style="margin:6px 0 0;">Plan: ${data.plan === 'quarterly' ? 'Quarterly' : 'Monthly'} · Ends ${fmtDate(data.endDate)}</p>
+    </div>
+  `;
+}
+
+function renderClientPortal(clientId, data){
+  app.innerHTML = '';
+  const wrap = el(`<div class="wrap"></div>`);
+  wrap.appendChild(el(`
+    <div class="topbar"><h3>FitArc</h3><button class="btn btn-outline btn-sm" id="logout-btn">Logout</button></div>
+  `));
+  wrap.querySelector('#logout-btn').addEventListener('click', clientLogout);
+  wrap.appendChild(el(subscriptionCard(data)));
+  wrap.appendChild(el(`
+    <div class="tabs">
+      <button class="tab-btn active" id="tab-checkin">Check-in</button>
+      <button class="tab-btn" id="tab-workout">Workout</button>
+      <button class="tab-btn" id="tab-diet">Diet</button>
+    </div>
+  `));
+  wrap.appendChild(el(`<div id="tab-content"></div>`));
+  app.appendChild(wrap);
+  const content = wrap.querySelector('#tab-content');
+  const tabCheckin = wrap.querySelector('#tab-checkin');
+  const tabWorkout = wrap.querySelector('#tab-workout');
+  const tabDiet = wrap.querySelector('#tab-diet');
+  function activate(tab){
+    [tabCheckin, tabWorkout, tabDiet].forEach(b => b.classList.remove('active'));
+    tab.classList.add('active');
+  }
+  tabCheckin.addEventListener('click', () => { activate(tabCheckin); renderCheckinTab(content, clientId, data.driveLink); });
+  tabWorkout.addEventListener('click', () => { activate(tabWorkout); renderClientWorkoutTab(content, clientId); });
+  tabDiet.addEventListener('click', () => { activate(tabDiet); renderClientDietTab(content, clientId); });
+  renderCheckinTab(content, clientId, data.driveLink);
+}
+
+// ---------------- scale helpers ----------------
+function buildNumberScale(name, label, max, initial){
+  const wrapper = el(`
+    <div class="stack-sm">
+      <div class="field-label">${label}</div>
+      <div class="scale-row" data-scale="${name}"></div>
+      <input type="hidden" name="${name}-val" value="${initial || ''}">
+    </div>
+  `);
+  const scaleEl = wrapper.querySelector('.scale-row');
+  const hidden = wrapper.querySelector(`input[name="${name}-val"]`);
+  for (let i=1;i<=max;i++){
+    const b = el(`<button type="button" class="scale-btn">${i}</button>`);
+    if (initial && Number(initial) === i) b.classList.add('sel');
+    b.addEventListener('click', () => {
+      scaleEl.querySelectorAll('button').forEach(x=>x.classList.remove('sel'));
+      b.classList.add('sel'); hidden.value = i;
+    });
+    scaleEl.appendChild(b);
+  }
+  return wrapper;
+}
+
+// two-button Yes/No toggle (same visual style as the number/label scales above).
+// Fires a 'yesno-change' custom event (detail: 'yes'|'no') on the wrapper so a
+// caller can show/hide a conditional follow-up field.
+function buildYesNo(name, label, initial){
+  const wrapper = el(`
+    <div class="stack-sm">
+      <div class="field-label">${label}</div>
+      <div class="scale-row" data-scale="${name}"></div>
+      <input type="hidden" name="${name}-val" value="${initial || ''}">
+    </div>
+  `);
+  const scaleEl = wrapper.querySelector('.scale-row');
+  const hidden = wrapper.querySelector(`input[name="${name}-val"]`);
+  [['yes','آه'], ['no','لأ']].forEach(([val, text]) => {
+    const b = el(`<button type="button" class="scale-btn" style="min-width:56px;">${text}</button>`);
+    if (initial === val) b.classList.add('sel');
+    b.addEventListener('click', () => {
+      scaleEl.querySelectorAll('button').forEach(x=>x.classList.remove('sel'));
+      b.classList.add('sel'); hidden.value = val;
+      wrapper.dispatchEvent(new CustomEvent('yesno-change', {detail: val}));
+    });
+    scaleEl.appendChild(b);
+  });
+  return wrapper;
+}
+
+function buildScale(name, label, labels, initial){
+  const wrapper = el(`
+    <div class="stack-sm">
+      <div class="field-label">${label}</div>
+      <div class="scale-row" data-scale="${name}"></div>
+      <div class="field-hint scale-caption"></div>
+      <input type="hidden" name="${name}-val" value="${initial || ''}">
+    </div>
+  `);
+  const scaleEl = wrapper.querySelector('.scale-row');
+  const caption = wrapper.querySelector('.scale-caption');
+  const hidden = wrapper.querySelector(`input[name="${name}-val"]`);
+  for (let i=1;i<=5;i++){
+    const b = el(`<button type="button" class="scale-btn">${i}</button>`);
+    if (initial && Number(initial) === i){ b.classList.add('sel'); caption.textContent = labels[i-1]; }
+    b.addEventListener('click', () => {
+      scaleEl.querySelectorAll('button').forEach(x=>x.classList.remove('sel'));
+      b.classList.add('sel'); hidden.value = i; caption.textContent = labels[i-1];
+    });
+    scaleEl.appendChild(b);
+  }
+  return wrapper;
+}
+
+// ---------------- assessment (first check-in) ----------------
+function renderAssessmentView(clientId, name, driveLink){
+  app.innerHTML = '';
+  const wrap = el(`<div class="wrap" dir="rtl"><h2 style="text-align:center;">التقييم الأول</h2><p style="text-align:center;">كمّل البيانات دي قبل ما نبدأ</p></div>`);
+  const form = el(`<form class="card stack"></form>`);
+
+  form.appendChild(el(`
+    <div class="stack-sm" style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:14px;">
+      <div class="field-label">صور قبل البرنامج (قدام / خلف / جنب)</div>
+      ${driveLink
+        ? `<a href="${driveLink}" target="_blank" rel="noopener" style="word-break:break-all;">${driveLink}</a>`
+        : `<p style="margin:0;">الكابتن لسه مضفّش لينك الصور — هيتضاف قريب.</p>`}
+    </div>
+  `));
+  form.appendChild(el(`<div class="stack-sm"><div class="field-label">الاسم بالكامل</div><input type="text" id="a-fullname" required value="${name || ''}"></div>`));
+  form.appendChild(el(`<div class="stack-sm"><div class="field-label">الوظيفة</div><input type="text" id="a-job" required></div>`));
+  form.appendChild(el(`<div class="stack-sm"><div class="field-label">السن</div><input type="number" inputmode="numeric" step="1" min="10" max="100" id="a-age" required></div>`));
+  form.appendChild(el(`<div class="stack-sm"><div class="field-label">الطول (سم)</div><input type="number" inputmode="decimal" step="0.5" min="100" max="250" id="a-height" required></div>`));
+  form.appendChild(el(`<div class="stack-sm"><div class="field-label">الوزن الحالي (كيلو)</div><input type="number" inputmode="decimal" step="0.1" min="20" max="400" id="a-weight" required></div>`));
+  form.appendChild(el(`<div class="stack-sm"><div class="field-label">تاريخ مرضي / إصابات</div><textarea id="a-medical" required></textarea></div>`));
+  form.appendChild(el(`<div class="stack-sm"><div class="field-label">هدفك من البرنامج</div><textarea id="a-goal" required></textarea></div>`));
+  form.appendChild(buildNumberScale('trainingDays', 'كام يوم في الأسبوع هتتمرن؟', 7, null));
+  form.appendChild(el(`<div class="stack-sm"><div class="field-label">مكملات غذائية متوفرة؟</div><textarea id="a-supplements" required></textarea></div>`));
+  form.appendChild(el(`<div class="stack-sm"><div class="field-label">أكلاتك المفضلة</div><textarea id="a-favfoods" required></textarea></div>`));
+  form.appendChild(el(`<div class="stack-sm"><div class="field-label">أكلات مش بتحبها</div><textarea id="a-dislikefoods" required></textarea></div>`));
+  form.appendChild(el(`<div class="stack-sm"><div class="field-label">متوسط عدد الخطوات اليومي</div><input type="number" inputmode="numeric" step="100" min="0" id="a-steps" required></div>`));
+  form.appendChild(buildNumberScale('mealsPerDay', 'بتاكل كام وجبة في اليوم؟', 6, null));
+  form.appendChild(el(`<div class="stack-sm"><div class="field-label">متوسط ساعات النوم في اليوم</div><input type="number" inputmode="decimal" step="0.5" min="0" max="16" id="a-sleep" required></div>`));
+  const trainedBeforeWrap = buildYesNo('trainedBefore', 'اتمرنت قبل كده؟', null);
+  form.appendChild(trainedBeforeWrap);
+  const trainedDurationWrap = el(`<div class="stack-sm" id="trained-duration-wrap" hidden><div class="field-label">اتمرنت قد ايه متواصل بالتزام؟</div><textarea id="a-trainedduration"></textarea></div>`);
+  form.appendChild(trainedDurationWrap);
+  trainedBeforeWrap.addEventListener('yesno-change', (e) => {
+    trainedDurationWrap.hidden = (e.detail !== 'yes');
+    if (e.detail !== 'yes') form.querySelector('#a-trainedduration').value = '';
+  });
+  const stressLabelsA = ['هادي خالص','هادي','عادي','متوتر','متوتر جدًا'];
+  form.appendChild(buildScale('stressLevel', 'مستوى الضغط النفسي', stressLabelsA, null));
+
+  const errBox = el(`<p style="color:var(--danger);display:none;">من فضلك ملى كل الخانات.</p>`);
+  form.appendChild(errBox);
+  form.appendChild(el(`<button type="submit" class="btn btn-block">إرسال</button>`));
+  wrap.appendChild(form);
+  app.appendChild(wrap);
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errBox.style.display = 'none';
+    const fullName = form.querySelector('#a-fullname').value;
+    const job = form.querySelector('#a-job').value;
+    const age = form.querySelector('#a-age').value;
+    const heightCm = form.querySelector('#a-height').value;
+    const weightKg = form.querySelector('#a-weight').value;
+    const medicalHistory = form.querySelector('#a-medical').value;
+    const goal = form.querySelector('#a-goal').value;
+    const trainingDays = form.querySelector('input[name="trainingDays-val"]').value;
+    const supplements = form.querySelector('#a-supplements').value;
+    const favoriteFoods = form.querySelector('#a-favfoods').value;
+    const dislikedFoods = form.querySelector('#a-dislikefoods').value;
+    const stepsPerDay = form.querySelector('#a-steps').value;
+    const mealsPerDay = form.querySelector('input[name="mealsPerDay-val"]').value;
+    const sleepHours = form.querySelector('#a-sleep').value;
+    const trainedBefore = form.querySelector('input[name="trainedBefore-val"]').value;
+    const trainedDuration = form.querySelector('#a-trainedduration').value;
+    const stressLevel = form.querySelector('input[name="stressLevel-val"]').value;
+    if (!fullName || !job || !age || !heightCm || !weightKg || !medicalHistory || !goal ||
+        !trainingDays || !supplements || !favoriteFoods || !dislikedFoods || !stepsPerDay ||
+        !mealsPerDay || !sleepHours || !trainedBefore || (trainedBefore === 'yes' && !trainedDuration) || !stressLevel){
+      errBox.style.display = 'block'; errBox.scrollIntoView({behavior:'smooth'}); return;
+    }
+    const btn = form.querySelector('button[type="submit"]');
+    btn.disabled = true; btn.textContent = 'بيتم الإرسال...';
+    try{
+      const r = await api('submitAssessment', {
+        clientId, fullName, job, age: Number(age), heightCm: Number(heightCm), weightKg: Number(weightKg),
+        medicalHistory, goal, trainingDays: Number(trainingDays), supplements, favoriteFoods, dislikedFoods,
+        stepsPerDay: Number(stepsPerDay), mealsPerDay: Number(mealsPerDay), sleepHours: Number(sleepHours), trainedBefore,
+        trainedDuration: trainedBefore === 'yes' ? trainedDuration : '',
+        stressLevel: Number(stressLevel),
+      });
+      if (r.ok) renderAssessmentSuccess(clientId, fullName.split(' ')[0] || name);
+      else { btn.disabled = false; btn.textContent = 'إرسال'; errBox.style.display = 'block'; }
+    } catch(err){ renderConnectionError(() => renderAssessmentView(clientId, name, driveLink)); }
+  });
+}
+
+function renderAssessmentSuccess(clientId, firstName){
+  app.innerHTML = '';
+  app.appendChild(el(`
+    <div class="wrap center-screen"><div class="card" style="text-align:center;max-width:380px;">
+      <h2>Thanks, ${firstName}! 💪</h2>
+      <p>We've got your info. Let's start the month!</p>
+      <button class="btn btn-block" id="done-btn">Continue</button>
+    </div></div>
+  `));
+  // go straight into the portal -- no logout / re-entering the code required
+  app.querySelector('#done-btn').addEventListener('click', () => renderClientView(clientId));
+}
+
+// ---------------- weekly check-in ----------------
+async function renderCheckinTab(content, clientId, driveLink){
+  content.innerHTML = '';
+  content.appendChild(el(`<div class="center-screen" style="min-height:160px;"><div class="spinner"></div></div>`));
+  let res;
+  try{ res = await api('getMyCheckin', {clientId}); }
+  catch(err){ return renderConnectionError(() => renderCheckinTab(content, clientId, driveLink)); }
+  content.innerHTML = '';
+
+  if (res.exists){
+    const k = res.data;
+    if (driveLink){
+      content.appendChild(el(`
+        <div class="stack-sm" style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px;" dir="rtl">
+          <div class="field-label">الانبدي + صور جسمك (قدام / ورا / جنب)</div>
+          <a href="${driveLink}" target="_blank" rel="noopener" style="word-break:break-all;">${driveLink}</a>
+        </div>
+      `));
+    }
+    content.appendChild(el(`
+      <div class="card" style="text-align:center;" dir="rtl">
+        <h3>متابعة الأسبوع ده اتسجلت ✓</h3>
+        <p>الوزن: ${fmtNum(k.weight)} كيلو · النوم: ${fmtNum(k.sleepHours)} ساعة · الخطوات: ${fmtNum(k.steps)}</p>
+        <p class="field-hint">تقدر تعدلها لحد ما الأسبوع يخلص.</p>
+        <button class="btn btn-outline" id="edit-checkin-btn">تعديل المتابعة</button>
+      </div>
+    `));
+    content.querySelector('#edit-checkin-btn').addEventListener('click', () => renderCheckinForm(content, clientId, driveLink, k));
+    return;
+  }
+  renderCheckinForm(content, clientId, driveLink, null);
+}
+
+function renderCheckinForm(content, clientId, driveLink, existing){
+  content.innerHTML = '';
+  const form = el(`<form class="card stack" dir="rtl"></form>`);
+
+  if (driveLink){
+    form.appendChild(el(`
+      <div class="stack-sm" style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:14px;">
+        <div class="field-label">الانبدي + صور جسمك (قدام / ورا / جنب)</div>
+        <a href="${driveLink}" target="_blank" rel="noopener" style="word-break:break-all;">${driveLink}</a>
+      </div>
+    `));
+  }
+
+  form.appendChild(el(`<div class="stack-sm"><div class="field-label">الوزن الحالي (كيلو)</div><input type="number" inputmode="decimal" step="0.1" min="20" max="400" id="f-weight" required value="${existing ? existing.weight : ''}"></div>`));
+  form.appendChild(el(`<div class="stack-sm"><div class="field-label">متوسط ساعات النوم في اليوم</div><div class="field-hint">تقريبًا، خلال الأسبوع اللي فات</div><input type="number" inputmode="decimal" step="0.5" min="0" max="16" id="f-sleep" required value="${existing ? existing.sleepHours : ''}"></div>`));
+
+  const energyLabels = ['ضعيف جدًا','تحت المعدل','متوسط','كويس','ممتاز'];
+  form.appendChild(buildScale('energy', 'مستوى الطاقة العام', energyLabels, existing ? existing.energy : null));
+  const dietLabels = ['مخالف تمامًا','التزام ضعيف','التزام متوسط','التزام كويس','التزام كامل'];
+  form.appendChild(buildScale('diet', 'مدى التزامك بالدايت', dietLabels, existing ? existing.diet : null));
+  const stressLabelsW = ['مرتاح خالص','مرتاح','عادي','متوتر','متوتر جدًا'];
+  form.appendChild(buildScale('stressLevel', 'مستوى الضغط النفسي', stressLabelsW, existing ? existing.stressLevel : null));
+
+  form.appendChild(el(`<div class="stack-sm"><div class="field-label">متوسط عدد الخطوات اليومي</div><input type="number" inputmode="numeric" step="100" min="0" id="f-steps" required value="${existing && existing.steps ? existing.steps : ''}"></div>`));
+  form.appendChild(el(`<div class="stack-sm"><div class="field-label">في مشاكل حصلت في التمرين أو الدايت الأسبوع ده؟</div><textarea id="f-problems">${existing ? (existing.problems||'') : ''}</textarea></div>`));
+  form.appendChild(el(`<div class="stack-sm"><div class="field-label">ملاحظات إضافية <span class="field-hint">(اختياري)</span></div><textarea id="f-notes">${existing ? (existing.notes||'') : ''}</textarea></div>`));
+
+  const ratingLabels = ['أسبوع صعب جدًا','تحت المتوقع','متوسط','كويس','أسبوع ممتاز'];
+  form.appendChild(buildScale('weekRating', 'قيّم أسبوعك', ratingLabels, existing ? existing.weekRating : null));
+
+  const errBox = el(`<p style="color:var(--danger);display:none;">من فضلك ملى كل الخانات المطلوبة.</p>`);
+  form.appendChild(errBox);
+  form.appendChild(el(`<button type="submit" class="btn btn-block">${existing ? 'حفظ التعديلات' : 'إرسال المتابعة'}</button>`));
+  content.appendChild(form);
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errBox.style.display = 'none';
+    const weight = form.querySelector('#f-weight').value;
+    const sleepHours = form.querySelector('#f-sleep').value;
+    const energy = form.querySelector('input[name="energy-val"]').value;
+    const diet = form.querySelector('input[name="diet-val"]').value;
+    const stressLevel = form.querySelector('input[name="stressLevel-val"]').value;
+    const steps = form.querySelector('#f-steps').value;
+    const problems = form.querySelector('#f-problems').value;
+    const notes = form.querySelector('#f-notes').value;
+    const weekRating = form.querySelector('input[name="weekRating-val"]').value;
+    if (!weight || !sleepHours || !energy || !diet || !stressLevel || !steps || !weekRating){
+      errBox.style.display = 'block'; errBox.scrollIntoView({behavior:'smooth'}); return;
+    }
+    const btn = form.querySelector('button[type="submit"]');
+    btn.disabled = true; btn.textContent = 'بيتم الحفظ...';
+    try{
+      const r = await api('submitCheckin', {
+        clientId, weight: Number(weight), sleepHours: Number(sleepHours), energy: Number(energy),
+        diet: Number(diet), stressLevel: Number(stressLevel), steps: Number(steps), problems, notes, weekRating: Number(weekRating),
+      });
+      if (r.ok) renderCheckinTab(content, clientId, driveLink);
+      else { btn.disabled = false; btn.textContent = existing ? 'حفظ التعديلات' : 'إرسال المتابعة'; }
+    } catch(err){ renderConnectionError(() => renderCheckinForm(content, clientId, driveLink, existing)); }
+  });
+}
+
+// ---------------- progression comparison (week-over-week, consecutive pairs, weight AND reps, set by set) ----------------
+function buildSetComparisonRows(points){
+  // points: [{week, weight, reps}] in week order; weight/reps may be '' or null for an unlogged week.
+  // Compares week 1 -> week 2, week 2 -> week 3, and so on, stopping at the last week
+  // that actually has a logged weight for this set.
+  const isLogged = (p) => p && p.weight != null && p.weight !== '' && !isNaN(Number(p.weight));
+  const loggedIdx = points.map((p, i) => isLogged(p) ? i : -1).filter(i => i >= 0);
+  if (loggedIdx.length < 2){
+    return el(`<p class="field-hint" style="margin:0 0 10px;font-size:13px;">Not enough data yet (need at least 2 weeks).</p>`);
+  }
+  const lastLogged = loggedIdx[loggedIdx.length - 1];
+  const rowsWrap = el(`<div class="stack-sm" style="margin-bottom:10px;"></div>`);
+  const hasReps = (p) => p && p.reps != null && p.reps !== '' && !isNaN(Number(p.reps));
+  for (let i = 0; i < lastLogged; i++){
+    const p1 = points[i], p2 = points[i + 1];
+    const w1 = isLogged(p1) ? Number(p1.weight) : null;
+    const w2 = isLogged(p2) ? Number(p2.weight) : null;
+    let row;
+    if (w1 != null && w2 != null){
+      const dw = Math.round((w2 - w1) * 100) / 100;
+      const wColor = dw >= 0 ? 'var(--success)' : 'var(--danger)';
+      let repsPart = '';
+      if (hasReps(p1) && hasReps(p2)){
+        const r1 = Number(p1.reps), r2 = Number(p2.reps);
+        const dr = r2 - r1;
+        const rColor = dr >= 0 ? 'var(--success)' : 'var(--danger)';
+        repsPart = ` <span class="field-hint">·</span> ${r1}→${r2} reps <span style="color:${rColor};">(${dr > 0 ? '+' : ''}${dr})</span>`;
+      }
+      row = el(`
+        <div class="row" style="justify-content:space-between;padding:6px 0;border-top:1px solid var(--border);flex-wrap:wrap;">
+          <span class="field-hint">Week ${p1.week} → Week ${p2.week}</span>
+          <span>${w1}→${w2} kg <span style="color:${wColor};">(${dw > 0 ? '+' : ''}${dw})</span>${repsPart}</span>
+        </div>
+      `);
+    } else {
+      row = el(`
+        <div class="row" style="justify-content:space-between;padding:6px 0;border-top:1px solid var(--border);">
+          <span class="field-hint">Week ${p1.week} → Week ${p2.week}</span>
+          <span class="field-hint">No data</span>
+        </div>
+      `);
+    }
+    rowsWrap.appendChild(row);
+  }
+  return rowsWrap;
+}
+
+function buildExerciseProgressCard(ex, setsPoints){
+  // setsPoints: array (one per set) of points arrays, each [{week, weight, reps}, ...]
+  const card = el(`<div class="card" style="margin-bottom:12px;"><h3 style="margin:0 0 8px;">${ex.name}</h3></div>`);
+  setsPoints.forEach((points, s) => {
+    card.appendChild(el(`<div class="field-hint" style="margin:${s === 0 ? '0' : '10px'} 0 4px;font-weight:600;">Set ${s + 1}</div>`));
+    card.appendChild(buildSetComparisonRows(points));
+  });
+  return card;
+}
+
+// builds one or two "Video" buttons for an exercise row — a second link is for
+// supersets, where one row covers two exercises done back-to-back.
+function buildVideoButtonsHtml(ex){
+  const icon = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>`;
+  let html = '';
+  if (ex.videoLink) html += `<a href="${ex.videoLink}" target="_blank" rel="noopener" class="video-link-btn">${icon}${ex.videoLink2 ? 'Video 1' : 'Video'}</a>`;
+  if (ex.videoLink2) html += `<a href="${ex.videoLink2}" target="_blank" rel="noopener" class="video-link-btn">${icon}Video 2</a>`;
+  return html;
+}
+
+// ---------------- warm-up section: collapsible table (exercise / sets / reps-time / video), coach-authored only ----------------
+function buildWarmupSection(warmup){
+  const list = (warmup && warmup.items) || [];
+  const notes = (warmup && warmup.notes) || '';
+  const wrap = el(`<div class="stack" style="margin-bottom:16px;"></div>`);
+  const toggleBtn = el(`<button type="button" class="btn btn-outline btn-block" id="toggle-warmup-btn">Show Warm Up (${list.length})</button>`);
+  wrap.appendChild(toggleBtn);
+  const tableCard = el(`
+    <div class="card" hidden>
+      <div class="row" style="font-weight:600;color:var(--text-dim);font-size:12px;padding-bottom:6px;">
+        <span style="flex:2;">Exercise</span><span style="width:60px;">Sets</span><span style="flex:1;">Reps / Time</span>
+      </div>
+    </div>
+  `);
+  list.forEach(w => {
+    const videoBtnHtml = w.videoLink
+      ? `<a href="${w.videoLink}" target="_blank" rel="noopener" class="video-link-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>Video</a>`
+      : '';
+    tableCard.appendChild(el(`
+      <div class="row" style="padding:8px 0;border-top:1px solid var(--border);align-items:center;">
+        <span style="flex:2;">${w.name}</span><span style="width:60px;">${w.sets || '—'}</span><span style="flex:1;display:flex;align-items:center;justify-content:space-between;gap:8px;">${w.repTime || '—'}${videoBtnHtml}</span>
+      </div>
+    `));
+  });
+  if (notes){
+    tableCard.appendChild(el(`<p style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);"><strong>Note:</strong> ${notes}</p>`));
+  }
+  wrap.appendChild(tableCard);
+  toggleBtn.addEventListener('click', () => {
+    tableCard.hidden = !tableCard.hidden;
+    toggleBtn.textContent = (tableCard.hidden ? 'Show' : 'Hide') + ` Warm Up (${list.length})`;
+  });
+  return wrap;
+}
+
+// ---------------- cardio section: collapsible table (cardio type / time / heart rate zone), coach-authored only ----------------
+// Same convention as the warm-up table above: a fixed list the coach fills in
+// once, shown read-only to the client, not logged/edited weekly. "name" is
+// the cardio type typed in freely by the coach (e.g. "Running", "Cycling").
+function buildCardioSection(cardio){
+  const list = cardio || [];
+  const wrap = el(`<div class="stack" style="margin-bottom:16px;"></div>`);
+  const toggleBtn = el(`<button type="button" class="btn btn-outline btn-block" id="toggle-cardio-btn">Show Cardio (${list.length})</button>`);
+  wrap.appendChild(toggleBtn);
+  const tableCard = el(`
+    <div class="card" hidden>
+      <div class="row" style="font-weight:600;color:var(--text-dim);font-size:12px;padding-bottom:6px;">
+        <span style="flex:2;">Cardio</span><span style="width:70px;">Time</span><span style="flex:1;">Heart Rate Zone</span>
+      </div>
+    </div>
+  `);
+  list.forEach(c => {
+    tableCard.appendChild(el(`
+      <div class="row" style="padding:8px 0;border-top:1px solid var(--border);align-items:center;">
+        <span style="flex:2;">${c.name}</span><span style="width:70px;">${c.time || '—'}</span><span style="flex:1;">${c.hrZone || '—'}</span>
+      </div>
+    `));
+  });
+  wrap.appendChild(tableCard);
+  toggleBtn.addEventListener('click', () => {
+    tableCard.hidden = !tableCard.hidden;
+    toggleBtn.textContent = (tableCard.hidden ? 'Show' : 'Hide') + ` Cardio (${list.length})`;
+  });
+  return wrap;
+}
+
+// ---------------- client workout tab ----------------
+async function renderClientWorkoutTab(content, clientId){
+  content.innerHTML = '';
+  content.appendChild(el(`<div class="center-screen" style="min-height:160px;"><div class="spinner"></div></div>`));
+  let all;
+  try{ all = await api('getMyWorkoutAll', {clientId}); }
+  catch(err){ return renderConnectionError(() => renderClientWorkoutTab(content, clientId)); }
+  content.innerHTML = '';
+  if (!all.ok) return;
+  if (!all.exercises.length){
+    content.appendChild(el(`<div class="card" style="text-align:center;"><p>Your coach hasn't set up your workout plan yet.</p></div>`));
+    return;
+  }
+  let currentWeek = 1;
+  // a client can only open week N once they've submitted (N-1) weekly check-ins --
+  // week 1 is always open. This does NOT apply to the coach's admin view (renderWorkoutAdminTab),
+  // which always has full access to every week.
+  const checkinsCount = all.checkinsCount || 0;
+  const unlockedThroughWeek = checkinsCount + 1;
+  const weekTabsWrap = el(`<div class="week-tabs"></div>`);
+  for (let w = 1; w <= all.totalWeeks; w++){
+    const locked = w > unlockedThroughWeek;
+    const b = el(`<button type="button" class="week-tab${w===1?' active':''}${locked?' locked':''}">${locked ? '🔒 ' : ''}Week ${w}</button>`);
+    if (locked){
+      b.disabled = true;
+      b.title = "Submit this week's check-in to unlock the next week";
+    } else {
+      b.addEventListener('click', () => { currentWeek = w; weekTabsWrap.querySelectorAll('.week-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); loadWeek(w); });
+    }
+    weekTabsWrap.appendChild(b);
+  }
+  content.appendChild(weekTabsWrap);
+  if (unlockedThroughWeek < all.totalWeeks){
+    content.appendChild(el(`<p class="field-hint" style="margin-top:-8px;">🔒 Submit this week's check-in (in the Check-in tab) to unlock next week's workout log.</p>`));
+  }
+
+  if (all.warmup && all.warmup.items && all.warmup.items.length){
+    content.appendChild(buildWarmupSection(all.warmup));
+  }
+
+  if (all.cardio && all.cardio.length){
+    content.appendChild(buildCardioSection(all.cardio));
+  }
+
+  const exWrap = el(`<div class="stack"></div>`);
+  content.appendChild(exWrap);
+  const saveBtn = el(`<button class="btn btn-block" id="save-workout-btn">Save</button>`);
+  content.appendChild(saveBtn);
+  const progressToggleBtn = el(`<button type="button" class="btn btn-outline btn-block" id="toggle-progress-btn" style="margin-top:16px;">Show Progress</button>`);
+  content.appendChild(progressToggleBtn);
+  const progressWrap = el(`<div class="stack" style="margin-top:10px;" hidden></div>`);
+  content.appendChild(progressWrap);
+
+  function renderProgress(){
+    progressWrap.innerHTML = '';
+    all.exercises.forEach((ex, i) => {
+      const setsPoints = [];
+      for (let s = 0; s < ex.setsCount; s++){
+        const points = [];
+        for (let w = 1; w <= all.totalWeeks; w++){
+          const log = all.logsByWeek[w];
+          const setData = (log && log[i] && log[i].sets[s]) ? log[i].sets[s] : null;
+          points.push({week: w, weight: setData ? setData.weight : null, reps: setData ? setData.reps : null});
+        }
+        setsPoints.push(points);
+      }
+      progressWrap.appendChild(buildExerciseProgressCard(ex, setsPoints));
+    });
+  }
+  renderProgress();
+  progressToggleBtn.addEventListener('click', () => {
+    progressWrap.hidden = !progressWrap.hidden;
+    progressToggleBtn.textContent = (progressWrap.hidden ? 'Show' : 'Hide') + ' Progress';
+  });
+
+  function loadWeek(weekNum){
+    exWrap.innerHTML = '';
+    const log = all.logsByWeek[weekNum];
+    all.exercises.forEach((ex, i) => {
+      const sets = (log && log[i]) ? log[i].sets : Array.from({length: ex.setsCount}, () => ({weight:'', reps:''}));
+      const existingNote = (log && log[i] && log[i].note) || '';
+      const videoBtnHtml = buildVideoButtonsHtml(ex);
+      const card = el(`
+        <div class="ex-card">
+          <div class="ex-card-head"><h3 style="margin:0;">${ex.name}</h3><div class="row" style="gap:6px;flex-shrink:0;">${videoBtnHtml}</div></div>
+          ${ex.restTime ? `<p class="field-hint" style="margin-top:-4px;">Rest: ${ex.restTime}</p>` : ''}
+          ${ex.notes ? `<p class="field-hint" style="margin:2px 0 0;">${ex.notes}</p>` : ''}
+          <div class="sets-area"></div>
+        </div>
+      `);
+      const setsArea = card.querySelector('.sets-area');
+      sets.forEach((s, si) => {
+        const row = el(`
+          <div class="set-row">
+            <span class="set-label">Set ${si+1}</span>
+            <input type="text" inputmode="decimal" placeholder="Weight" class="set-weight" value="${s.weight || ''}" style="max-width:100px;">
+            <input type="text" inputmode="numeric" placeholder="Reps" class="set-reps" value="${s.reps || ''}" style="max-width:90px;">
+          </div>
+        `);
+        setsArea.appendChild(row);
+      });
+      card.appendChild(el(`
+        <div class="stack-sm" style="margin-top:8px;">
+          <div class="field-hint">Your notes</div>
+          <textarea class="ex-note">${existingNote}</textarea>
+        </div>
+      `));
+      exWrap.appendChild(card);
+    });
+  }
+  loadWeek(1);
+
+  saveBtn.addEventListener('click', async () => {
+    const data = [];
+    exWrap.querySelectorAll('.ex-card').forEach(card => {
+      const sets = [];
+      card.querySelectorAll('.set-row').forEach(row => {
+        sets.push({ weight: row.querySelector('.set-weight').value, reps: row.querySelector('.set-reps').value });
+      });
+      const noteEl = card.querySelector('.ex-note');
+      data.push({ sets, note: noteEl ? noteEl.value : '' });
+    });
+    saveBtn.disabled = true; saveBtn.textContent = 'Saving...';
+    try{
+      const r = await api('logWorkout', {clientId, weekNumber: currentWeek, data});
+      if (r.ok){ all.logsByWeek[currentWeek] = r.data; renderProgress(); saveBtn.textContent = 'Saved ✓'; setTimeout(() => { saveBtn.textContent = 'Save'; saveBtn.disabled = false; }, 1200); }
+      else { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+    } catch(err){ renderConnectionError(() => renderClientWorkoutTab(content, clientId)); }
+  });
+}
+
+// ---------------- client diet tab ----------------
+async function renderClientDietTab(content, clientId){
+  content.innerHTML = '';
+  content.appendChild(el(`<div class="center-screen" style="min-height:160px;"><div class="spinner"></div></div>`));
+  let res;
+  try{ res = await api('getMyDietPlan', {clientId}); }
+  catch(err){ return renderConnectionError(() => renderClientDietTab(content, clientId)); }
+  content.innerHTML = '';
+  if (!res.ok || !res.days.length){
+    content.appendChild(el(`<div class="card" style="text-align:center;"><p>Your coach hasn't set up your diet plan yet.</p></div>`));
+    return;
+  }
+  const dayTabs = el(`<div class="week-tabs"></div>`);
+  const dayContent = el(`<div></div>`);
+  res.days.forEach((day, i) => {
+    const b = el(`<button type="button" class="week-tab${i===0?' active':''}">${day.title}</button>`);
+    b.addEventListener('click', () => { dayTabs.querySelectorAll('.week-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); showDay(i); });
+    dayTabs.appendChild(b);
+  });
+  content.appendChild(dayTabs);
+  content.appendChild(dayContent);
+  function showDay(i){
+    dayContent.innerHTML = '';
+    const day = res.days[i];
+    if (!day.meals.length){ dayContent.appendChild(el(`<p>No meals recorded.</p>`)); return; }
+    day.meals.forEach(m => {
+      dayContent.appendChild(el(`
+        <div class="card">
+          <h3>${m.title}</h3>
+          <p style="white-space:pre-wrap;">${m.content}</p>
+        </div>
+      `));
+    });
+  }
+  showDay(0);
+}
+
+// ================= ADMIN =================
+
+function renderAdminLogin(msg){
+  app.innerHTML = '';
+  app.appendChild(el(`
+    <div class="wrap center-screen"><div class="card" style="max-width:380px;width:100%;">
+      <h2 style="text-align:center;">Coach Login</h2>
+      ${msg ? `<p style="color:var(--danger);text-align:center;">${msg}</p>` : ''}
+      <div class="stack">
+        <input type="password" id="admin-pw" placeholder="Password">
+        <button class="btn btn-block" id="admin-login-btn">Log In</button>
+      </div>
+    </div></div>
+  `));
+  const btn = app.querySelector('#admin-login-btn');
+  const input = app.querySelector('#admin-pw');
+  async function doLogin(){
+    const pw = input.value;
+    if (!pw) return;
+    btn.disabled = true; btn.textContent = 'Logging in...';
+    try{
+      const r = await api('adminLogin', {password: pw});
+      if (r.ok){ sessionStorage.setItem('oc_admin_pw', pw); renderAdminDashboard(pw); }
+      else renderAdminLogin('Wrong password');
+    } catch(err){ renderConnectionError(() => renderAdminLogin()); }
+  }
+  btn.addEventListener('click', doLogin);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+}
+
+function adminLogout(){ sessionStorage.removeItem('oc_admin_pw'); renderAdminLogin(); }
+
+function planLabel(plan){ return plan === 'quarterly' ? 'Quarterly' : 'Monthly'; }
+
+async function renderAdminDashboard(pw){
+  app.innerHTML = '';
+  app.appendChild(el(`<div class="wrap wide center-screen"><div class="spinner"></div></div>`));
+  let clients;
+  try{
+    const r = await api('listClients', {password: pw});
+    if (!r.ok){ sessionStorage.removeItem('oc_admin_pw'); return renderAdminLogin('Session expired, please log in again.'); }
+    clients = r.clients;
+  } catch(err){ return renderConnectionError(() => renderAdminDashboard(pw)); }
+
+  app.innerHTML = '';
+  const wrap = el(`<div class="wrap wide"></div>`);
+  wrap.appendChild(el(`
+    <div class="topbar"><h3>FitArc</h3><button class="btn btn-outline btn-sm" id="logout-btn">Logout</button></div>
+  `));
+  wrap.querySelector('#logout-btn').addEventListener('click', adminLogout);
+
+  wrap.appendChild(el(`
+    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h2 style="margin:0;">Your Clients (${clients.length})</h2>
+      <div class="row">
+        <button class="btn btn-outline btn-sm" id="templates-btn">Plan Templates</button>
+        <button class="btn btn-sm" id="add-client-btn">+ Add Client</button>
+      </div>
+    </div>
+  `));
+  const grid = el(`<div class="client-grid"></div>`);
+  if (!clients.length) grid.appendChild(el(`<p>No clients yet.</p>`));
+  clients.forEach(c => {
+    const dClass = c.daysRemaining <= 5 ? 'pill-danger' : (c.daysRemaining <= 10 ? 'pill-warn' : 'pill-ok');
+    const lastLogText = c.lastWorkoutLog ? `Last log: ${fmtDate(c.lastWorkoutLog)}` : 'No logs yet';
+    const card = el(`
+      <div class="client-card" style="cursor:pointer;">
+        <div class="client-card-head">
+          <h3>${c.name}</h3>
+          <span class="pill ${dClass}">${c.daysRemaining > 0 ? c.daysRemaining + ' days' : 'Expired'}</span>
+        </div>
+        <p class="field-hint" style="margin:0 0 8px;">${planLabel(c.plan)} · Login ID: ${c.loginId} · ${lastLogText}</p>
+        <div class="client-actions">
+          <button class="btn btn-outline btn-sm edit-btn">Edit</button>
+          <button class="btn btn-outline btn-sm delete-btn" style="color:var(--danger);border-color:var(--danger);">Delete</button>
+        </div>
+      </div>
+    `);
+    card.querySelector('.edit-btn').addEventListener('click', (e) => { e.stopPropagation(); openEditClientModal(pw, c, () => renderAdminDashboard(pw)); });
+    card.querySelector('.delete-btn').addEventListener('click', (e) => { e.stopPropagation(); confirmDeleteClient(pw, c.id, c.name, () => renderAdminDashboard(pw)); });
+    card.addEventListener('click', () => renderClientDetail(pw, c.id));
+    grid.appendChild(card);
+  });
+  wrap.appendChild(grid);
+  app.appendChild(wrap);
+  wrap.querySelector('#add-client-btn').addEventListener('click', () => openAddClientModal(pw, () => renderAdminDashboard(pw)));
+  wrap.querySelector('#templates-btn').addEventListener('click', () => renderTemplatesLibrary(pw));
+}
+
+function openModal(innerHtml, wide){
+  const overlay = el(`<div class="modal-overlay"><div class="modal-box${wide ? ' modal-box-wide' : ''}"></div></div>`);
+  overlay.querySelector('.modal-box').innerHTML = innerHtml;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function openAddClientModal(pw, onDone){
+  const overlay = openModal(`
+    <h3>Add Client</h3>
+    <div class="stack">
+      <div class="stack-sm"><div class="field-label">Name</div><input type="text" id="nc-name"></div>
+      <div class="stack-sm"><div class="field-label">Phone number</div><input type="tel" id="nc-phone"></div>
+      <div class="stack-sm"><div class="field-label">Subscription plan</div>
+        <select id="nc-plan"><option value="monthly">Monthly (4 weeks)</option><option value="quarterly">Quarterly (12 weeks)</option></select>
+      </div>
+      <div class="stack-sm"><div class="field-label">Drive link (optional)</div><input type="text" id="nc-drive" placeholder="https://drive.google.com/..."></div>
+      <div class="row">
+        <button class="btn" id="nc-save">Save</button>
+        <button class="btn btn-outline" id="nc-cancel">Cancel</button>
+      </div>
+    </div>
+  `);
+  overlay.querySelector('#nc-cancel').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#nc-save').addEventListener('click', async () => {
+    const name = overlay.querySelector('#nc-name').value;
+    const phone = overlay.querySelector('#nc-phone').value;
+    const plan = overlay.querySelector('#nc-plan').value;
+    const driveLink = overlay.querySelector('#nc-drive').value;
+    if (!name) return;
+    const r = await api('addClient', {password: pw, name, phone, plan, driveLink});
+    if (r.ok){ overlay.remove(); onDone(); }
+  });
+}
+
+function openEditClientModal(pw, client, onDone){
+  const overlay = openModal(`
+    <h3>Edit Client Info</h3>
+    <div class="stack">
+      <div class="stack-sm"><div class="field-label">Name</div><input type="text" id="ec-name" value="${client.name || ''}"></div>
+      <div class="stack-sm"><div class="field-label">Phone number</div><input type="tel" id="ec-phone" value="${client.phone || ''}"></div>
+      <div class="stack-sm"><div class="field-label">Drive link</div><input type="text" id="ec-drive" value="${client.driveLink || ''}"></div>
+      <div class="row">
+        <button class="btn" id="ec-save">Save</button>
+        <button class="btn btn-outline" id="ec-cancel">Cancel</button>
+      </div>
+    </div>
+  `);
+  overlay.querySelector('#ec-cancel').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#ec-save').addEventListener('click', async () => {
+    const name = overlay.querySelector('#ec-name').value;
+    const phone = overlay.querySelector('#ec-phone').value;
+    const driveLink = overlay.querySelector('#ec-drive').value;
+    if (!name) return;
+    const r = await api('updateClient', {password: pw, clientId: client.id, name, phone, driveLink});
+    if (r.ok){ overlay.remove(); onDone(); }
+  });
+}
+
+async function confirmDeleteClient(pw, clientId, name, onDone){
+  if (!confirm(`Are you sure you want to delete "${name}"? This will delete all their data (check-ins, workouts, diet) and cannot be undone.`)) return;
+  const r = await api('deleteClient', {password: pw, clientId});
+  if (r.ok) onDone();
+  else alert('Something went wrong, please try again.');
+}
+
+// ---------------- client detail (admin) ----------------
+async function renderClientDetail(pw, clientId){
+  app.innerHTML = '';
+  app.appendChild(el(`<div class="wrap wide center-screen"><div class="spinner"></div></div>`));
+  let c;
+  try{
+    const r = await api('getClientDetail', {password: pw, clientId});
+    if (!r.ok){ sessionStorage.removeItem('oc_admin_pw'); return renderAdminLogin('Session expired, please log in again.'); }
+    c = r;
+  } catch(err){ return renderConnectionError(() => renderClientDetail(pw, clientId)); }
+
+  app.innerHTML = '';
+  const wrap = el(`<div class="wrap wide"></div>`);
+  const dClass = c.daysRemaining <= 5 ? 'pill-danger' : (c.daysRemaining <= 10 ? 'pill-warn' : 'pill-ok');
+  wrap.appendChild(el(`
+    <div class="topbar">
+      <div class="row" style="align-items:center;gap:12px;">
+        <button class="btn btn-outline btn-sm" id="back-btn">← Back</button>
+        <h3 style="margin:0;">${c.name}</h3>
+        <span class="pill ${dClass}">${c.daysRemaining > 0 ? c.daysRemaining + ' days left' : 'Expired'}</span>
+      </div>
+      <button class="btn btn-outline btn-sm" id="logout-btn">Logout</button>
+    </div>
+  `));
+  wrap.querySelector('#back-btn').addEventListener('click', () => renderAdminDashboard(pw));
+  wrap.querySelector('#logout-btn').addEventListener('click', adminLogout);
+
+  wrap.appendChild(el(`
+    <div class="tabs">
+      <button class="tab-btn active" id="t-checkin">Check-in</button>
+      <button class="tab-btn" id="t-workout">Workout</button>
+      <button class="tab-btn" id="t-diet">Diet</button>
+      <button class="tab-btn" id="t-sub">Subscription</button>
+    </div>
+  `));
+  wrap.appendChild(el(`<div id="admin-tab-content"></div>`));
+  app.appendChild(wrap);
+  const content = wrap.querySelector('#admin-tab-content');
+  const tabs = { checkin: wrap.querySelector('#t-checkin'), workout: wrap.querySelector('#t-workout'), diet: wrap.querySelector('#t-diet'), sub: wrap.querySelector('#t-sub') };
+  function activate(key){ Object.values(tabs).forEach(b => b.classList.remove('active')); tabs[key].classList.add('active'); }
+  async function refreshWorkoutTab(){
+    // re-fetch totalWeeks (it may have changed via add/remove month) and
+    // re-render the workout tab in place, instead of resetting the whole
+    // client-detail page back to the "checkin" tab.
+    const fresh = await api('getClientDetail', {password: pw, clientId});
+    if (fresh.ok){ c.totalWeeks = fresh.totalWeeks; renderWorkoutAdminTab(content, pw, clientId, fresh.totalWeeks, refreshWorkoutTab); }
+  }
+  tabs.checkin.addEventListener('click', () => { activate('checkin'); renderAssessmentCheckinTab(content, pw, clientId); });
+  tabs.workout.addEventListener('click', () => { activate('workout'); renderWorkoutAdminTab(content, pw, clientId, c.totalWeeks, refreshWorkoutTab); });
+  tabs.diet.addEventListener('click', () => { activate('diet'); renderDietAdminTab(content, pw, clientId); });
+  tabs.sub.addEventListener('click', () => { activate('sub'); renderSubscriptionAdminTab(content, pw, clientId, c); });
+  renderAssessmentCheckinTab(content, pw, clientId);
+}
+
+// ---- tab: assessment + weekly checkins + weight comparison ----
+async function renderAssessmentCheckinTab(content, pw, clientId){
+  content.innerHTML = '';
+  content.appendChild(el(`<div class="center-screen" style="min-height:160px;"><div class="spinner"></div></div>`));
+  let aRes, kRes;
+  try{
+    [aRes, kRes] = await Promise.all([
+      api('getClientAssessment', {password: pw, clientId}),
+      api('listCheckins', {password: pw}),
+    ]);
+  } catch(err){ return renderConnectionError(() => renderAssessmentCheckinTab(content, pw, clientId)); }
+  content.innerHTML = '';
+  const myCheckins = (kRes.checkins || []).filter(k => k.clientId === clientId).sort((a,b) => (a.weekId||'').localeCompare(b.weekId||''));
+
+  if (aRes.exists){
+    const a = aRes;
+    content.appendChild(el(`
+      <div class="card">
+        <h3>First Assessment Data</h3>
+        <div class="detail-grid">
+          <div class="detail-item"><div class="field-hint">Occupation</div><div class="num" style="font-size:16px;">${a.job || '—'}</div></div>
+          <div class="detail-item"><div class="field-hint">Age</div><div class="num">${fmtNum(a.age)}</div></div>
+          <div class="detail-item"><div class="field-hint">Height</div><div class="num">${fmtNum(a.heightCm)} <span class="field-hint">cm</span></div></div>
+          <div class="detail-item"><div class="field-hint">Weight at assessment</div><div class="num">${fmtNum(a.weightKg)} <span class="field-hint">kg</span></div></div>
+          <div class="detail-item"><div class="field-hint">Training days/week</div><div class="num">${fmtNum(a.trainingDays)}</div></div>
+          <div class="detail-item"><div class="field-hint">Meals/day</div><div class="num">${fmtNum(a.mealsPerDay)}</div></div>
+          <div class="detail-item"><div class="field-hint">Sleep hours</div><div class="num">${fmtNum(a.sleepHours)}</div></div>
+          <div class="detail-item"><div class="field-hint">Steps/day</div><div class="num">${fmtNum(a.stepsPerDay)}</div></div>
+          <div class="detail-item"><div class="field-hint">Stress Level</div><div class="num">${fmtNum(a.stressLevel)}/5</div></div>
+        </div>
+        <p><strong>Medical history/injuries:</strong> ${a.medicalHistory || '—'}</p>
+        <p><strong>Goal:</strong> ${a.goal || '—'}</p>
+        <p><strong>Supplements:</strong> ${a.supplements || '—'}</p>
+        <p><strong>Favorite foods:</strong> ${a.favoriteFoods || '—'}</p>
+        <p><strong>Disliked foods:</strong> ${a.dislikedFoods || '—'}</p>
+        <p><strong>Trained before?:</strong> ${a.trainedBefore === 'yes' ? 'Yes' : (a.trainedBefore === 'no' ? 'No' : '—')}${a.trainedBefore === 'yes' && a.trainedDuration ? ` — ${a.trainedDuration}` : ''}</p>
+      </div>
+    `));
+
+    const firstCheckin = myCheckins[0];
+    if (firstCheckin && firstCheckin.weight !== '' && firstCheckin.weight != null && a.weightKg != null){
+      const w1 = Number(a.weightKg), w2 = Number(firstCheckin.weight);
+      const d = w2 - w1;
+      const color = d <= 0 ? 'var(--success)' : 'var(--danger)';
+      content.appendChild(el(`
+        <div class="card">
+          <h3>Weight Comparison: First Assessment → First Weekly Check-in</h3>
+          <div class="detail-grid">
+            <div class="detail-item"><div class="field-hint">At assessment</div><div class="num">${w1} <span class="field-hint">kg</span></div></div>
+            <div class="detail-item"><div class="field-hint">First check-in</div><div class="num">${w2} <span class="field-hint">kg</span></div></div>
+            <div class="detail-item"><div class="field-hint">Difference</div><div class="num" style="color:${color};">${d > 0 ? '+' : ''}${d.toFixed(1)} <span class="field-hint">kg</span></div></div>
+          </div>
+        </div>
+      `));
+    }
+  } else {
+    content.appendChild(el(`<div class="card"><p>Client hasn't submitted their first assessment yet.</p></div>`));
+  }
+
+  const checkinsCard = el(`<div class="card"><h3>Weekly Check-in Log (${myCheckins.length})</h3></div>`);
+  if (!myCheckins.length){
+    checkinsCard.appendChild(el(`<p>No check-ins yet.</p>`));
+  } else {
+    myCheckins.slice().reverse().forEach(k => {
+      checkinsCard.appendChild(el(`
+        <div class="ex-card" style="margin-bottom:10px;">
+          <div class="field-hint">${k.weekId} · ${fmtDate(k.submittedAt)}</div>
+          <div class="detail-grid">
+            <div class="detail-item"><div class="field-hint">Weight</div><div class="num">${fmtNum(k.weight)}</div></div>
+            <div class="detail-item"><div class="field-hint">Sleep</div><div class="num">${fmtNum(k.sleepHours)}</div></div>
+            <div class="detail-item"><div class="field-hint">Energy</div><div class="num">${fmtNum(k.energy)}/5</div></div>
+            <div class="detail-item"><div class="field-hint">Adherence</div><div class="num">${fmtNum(k.diet)}/5</div></div>
+            <div class="detail-item"><div class="field-hint">Stress Level</div><div class="num">${fmtNum(k.stressLevel)}/5</div></div>
+            <div class="detail-item"><div class="field-hint">Steps</div><div class="num">${fmtNum(k.steps)}</div></div>
+            <div class="detail-item"><div class="field-hint">Week Rating</div><div class="num">${fmtNum(k.weekRating)}/5</div></div>
+          </div>
+          ${k.problems ? `<p><strong>Issues:</strong> ${k.problems}</p>` : ''}
+          ${k.notes ? `<p><strong>Notes:</strong> ${k.notes}</p>` : ''}
+        </div>
+      `));
+    });
+  }
+  content.appendChild(checkinsCard);
+}
+
+// ---- tab: workout plan + weekly log + progression ----
+async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefresh){
+  content.innerHTML = '';
+  content.appendChild(el(`<div class="center-screen" style="min-height:160px;"><div class="spinner"></div></div>`));
+  let week1;
+  try{ week1 = await api('getWorkoutWeekAdmin', {password: pw, clientId, weekNumber: 1}); }
+  catch(err){ return renderConnectionError(() => renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefresh)); }
+  content.innerHTML = '';
+
+  content.appendChild(el(`
+    <div class="row" style="justify-content:space-between;margin-bottom:10px;">
+      <button class="btn btn-outline btn-sm" id="edit-plan-btn">Edit Workout Plan</button>
+      <div class="row">
+        <button class="btn btn-outline btn-sm" id="add-month-btn">+ Month (4 weeks)</button>
+        <button class="btn btn-outline btn-sm" id="remove-month-btn" style="color:var(--danger);border-color:var(--danger);">- Month</button>
+      </div>
+    </div>
+  `));
+  content.querySelector('#edit-plan-btn').addEventListener('click', () => openWorkoutPlanEditor(pw, clientId, week1.exercises, week1.warmup, week1.cardio, onRefresh));
+  content.querySelector('#add-month-btn').addEventListener('click', async () => {
+    const r = await api('addMonth', {password: pw, clientId});
+    if (r.ok) onRefresh();
+  });
+  content.querySelector('#remove-month-btn').addEventListener('click', async () => {
+    if (!confirm('This will delete the last 4 weeks and any logged data in them. Are you sure?')) return;
+    const r = await api('removeMonth', {password: pw, clientId});
+    if (r.ok) onRefresh();
+    else alert(r.error === 'cannot_remove_last_weeks' ? 'Cannot remove all weeks.' : 'Something went wrong.');
+  });
+
+  if (!week1.exercises.length){
+    content.appendChild(el(`<div class="card"><p>No workout plan for this client yet. Click "Edit Workout Plan" to get started.</p></div>`));
+    return;
+  }
+
+  let currentWeek = 1;
+  const weekTabsWrap = el(`<div class="week-tabs"></div>`);
+  for (let w = 1; w <= totalWeeks; w++){
+    const b = el(`<button type="button" class="week-tab${w===1?' active':''}">Week ${w}</button>`);
+    b.addEventListener('click', () => { currentWeek = w; weekTabsWrap.querySelectorAll('.week-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); loadWeek(w); });
+    weekTabsWrap.appendChild(b);
+  }
+  content.appendChild(weekTabsWrap);
+
+  if (week1.warmup.items.length){
+    content.appendChild(buildWarmupSection(week1.warmup));
+  }
+
+  if (week1.cardio.length){
+    content.appendChild(buildCardioSection(week1.cardio));
+  }
+
+  const exWrap = el(`<div class="stack"></div>`);
+  content.appendChild(exWrap);
+  const saveBtn = el(`<button class="btn btn-block" id="save-log-btn">Save</button>`);
+  content.appendChild(saveBtn);
+  const progressToggleBtn = el(`<button type="button" class="btn btn-outline btn-block" id="toggle-progress-btn" style="margin-top:16px;">Show Progress</button>`);
+  content.appendChild(progressToggleBtn);
+  const progressWrap = el(`<div class="stack" style="margin-top:10px;" hidden></div>`);
+  content.appendChild(progressWrap);
+
+  let weekCache = { 1: week1 };
+  let progressLoaded = false;
+  async function renderProgress(){
+    progressWrap.innerHTML = '<div class="spinner"></div>';
+    const all = await api('getClientWorkoutAll', {password: pw, clientId});
+    progressWrap.innerHTML = '';
+    all.exercises.forEach((ex, i) => {
+      const setsPoints = [];
+      for (let s = 0; s < ex.setsCount; s++){
+        const points = [];
+        for (let w = 1; w <= all.totalWeeks; w++){
+          const log = all.logsByWeek[w];
+          const setData = (log && log[i] && log[i].sets[s]) ? log[i].sets[s] : null;
+          points.push({week: w, weight: setData ? setData.weight : null, reps: setData ? setData.reps : null});
+        }
+        setsPoints.push(points);
+      }
+      progressWrap.appendChild(buildExerciseProgressCard(ex, setsPoints));
+    });
+    progressLoaded = true;
+  }
+  progressToggleBtn.addEventListener('click', async () => {
+    progressWrap.hidden = !progressWrap.hidden;
+    progressToggleBtn.textContent = (progressWrap.hidden ? 'Show' : 'Hide') + ' Progress';
+    if (!progressWrap.hidden && !progressLoaded) await renderProgress();
+  });
+
+  async function loadWeek(weekNum){
+    exWrap.innerHTML = '<div class="spinner"></div>';
+    let wk = weekCache[weekNum];
+    if (!wk){ wk = await api('getWorkoutWeekAdmin', {password: pw, clientId, weekNumber: weekNum}); weekCache[weekNum] = wk; }
+    exWrap.innerHTML = '';
+    wk.exercises.forEach((ex, i) => {
+      const sets = (wk.data[i]) ? wk.data[i].sets : [];
+      const existingNote = (wk.data[i] && wk.data[i].note) || '';
+      const videoBtnHtml = buildVideoButtonsHtml(ex);
+      const card = el(`
+        <div class="ex-card">
+          <div class="ex-card-head"><h3 style="margin:0;">${ex.name}</h3><div class="row" style="gap:6px;flex-shrink:0;">${videoBtnHtml}</div></div>
+          ${ex.restTime ? `<p class="field-hint" style="margin-top:-4px;">Rest: ${ex.restTime}</p>` : ''}
+          ${ex.notes ? `<p class="field-hint" style="margin:2px 0 0;">${ex.notes}</p>` : ''}
+          <div class="sets-area"></div>
+          ${existingNote ? `<p class="field-hint" style="margin-top:8px;"><strong>Client note:</strong> ${existingNote}</p>` : ''}
+        </div>
+      `);
+      card.dataset.note = existingNote;
+      const setsArea = card.querySelector('.sets-area');
+      sets.forEach((s, si) => {
+        setsArea.appendChild(el(`
+          <div class="set-row">
+            <span class="set-label">Set ${si+1}</span>
+            <input type="text" inputmode="decimal" placeholder="Weight" class="set-weight" value="${s.weight || ''}" style="max-width:100px;">
+            <input type="text" inputmode="numeric" placeholder="Reps" class="set-reps" value="${s.reps || ''}" style="max-width:90px;">
+          </div>
+        `));
+      });
+      exWrap.appendChild(card);
+    });
+  }
+  loadWeek(1);
+
+  saveBtn.addEventListener('click', async () => {
+    const data = [];
+    exWrap.querySelectorAll('.ex-card').forEach(card => {
+      const sets = [];
+      card.querySelectorAll('.set-row').forEach(row => {
+        sets.push({ weight: row.querySelector('.set-weight').value, reps: row.querySelector('.set-reps').value });
+      });
+      data.push({ sets, note: card.dataset.note || '' });
+    });
+    saveBtn.disabled = true; saveBtn.textContent = 'Saving...';
+    const r = await api('saveWorkoutLog', {password: pw, clientId, weekNumber: currentWeek, data});
+    if (r.ok){
+      weekCache[currentWeek] = { exercises: week1.exercises, warmup: week1.warmup, data: r.data };
+      progressLoaded = false;
+      if (!progressWrap.hidden) await renderProgress();
+      saveBtn.textContent = 'Saved ✓'; setTimeout(() => { saveBtn.textContent = 'Save'; saveBtn.disabled = false; }, 1200);
+    }
+    else { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+  });
+}
+
+// ---- shared plan-editor row builders (used by the client plan editor AND the template editor) ----
+function buildWarmupRow(container, w){
+  const row = el(`
+    <div class="stack-sm warmup-row" style="border:1px solid var(--border);border-radius:10px;padding:10px;">
+      <div class="row" style="align-items:center;">
+        <input type="text" class="w-name" placeholder="Exercise name" value="${(w && w.name) || ''}" style="flex:2;">
+        <input type="text" class="w-sets" placeholder="Sets" value="${(w && w.sets) || ''}" style="max-width:70px;">
+        <button type="button" class="icon-btn remove-row">×</button>
+      </div>
+      <input type="text" class="w-reptime" placeholder="Reps / time (e.g. 30 sec)" value="${(w && w.repTime) || ''}">
+      <input type="text" class="w-video" placeholder="Video link (optional)" value="${(w && w.videoLink) || ''}">
+    </div>
+  `);
+  row.querySelector('.remove-row').addEventListener('click', () => row.remove());
+  container.appendChild(row);
+  return row;
+}
+function buildExRow(container, ex){
+  const row = el(`
+    <div class="stack-sm ex-row" style="border:1px solid var(--border);border-radius:10px;padding:10px;">
+      <div class="row" style="align-items:center;">
+        <input type="text" class="x-name" placeholder="Exercise name" value="${(ex && ex.name) || ''}" style="flex:2;">
+        <input type="number" class="x-sets" placeholder="Sets" min="1" max="12" value="${(ex && ex.setsCount) || 3}" style="max-width:110px;">
+        <button type="button" class="icon-btn remove-row">×</button>
+      </div>
+      <input type="text" class="x-rest" placeholder="Rest time (e.g. 60-90 sec, optional)" value="${(ex && ex.restTime) || ''}">
+      <input type="text" class="x-video" placeholder="Video link (optional)" value="${(ex && ex.videoLink) || ''}">
+      <input type="text" class="x-video2" placeholder="Video link 2 (optional — for supersets)" value="${(ex && ex.videoLink2) || ''}">
+      <input type="text" class="x-notes" placeholder="Notes (optional)" value="${(ex && ex.notes) || ''}">
+    </div>
+  `);
+  row.querySelector('.remove-row').addEventListener('click', () => row.remove());
+  container.appendChild(row);
+  return row;
+}
+function readWarmupRows(container){
+  const out = [];
+  container.querySelectorAll('.warmup-row').forEach(row => {
+    const name = row.querySelector('.w-name').value;
+    if (name) out.push({
+      name, sets: row.querySelector('.w-sets').value, repTime: row.querySelector('.w-reptime').value,
+      videoLink: row.querySelector('.w-video').value,
+    });
+  });
+  return out;
+}
+// cardio row: fixed cardio list, coach-authored only (name = cardio type typed in freely, e.g. "Running")
+function buildCardioRow(container, c){
+  const row = el(`
+    <div class="stack-sm cardio-row" style="border:1px solid var(--border);border-radius:10px;padding:10px;">
+      <div class="row" style="align-items:center;">
+        <input type="text" class="c-name" placeholder="Cardio type (e.g. Running)" value="${(c && c.name) || ''}" style="flex:2;">
+        <input type="text" class="c-time" placeholder="Time" value="${(c && c.time) || ''}" style="max-width:90px;">
+        <button type="button" class="icon-btn remove-row">×</button>
+      </div>
+      <input type="text" class="c-hrzone" placeholder="Heart rate zone (e.g. Zone 2)" value="${(c && c.hrZone) || ''}">
+    </div>
+  `);
+  row.querySelector('.remove-row').addEventListener('click', () => row.remove());
+  container.appendChild(row);
+  return row;
+}
+function readCardioRows(container){
+  const out = [];
+  container.querySelectorAll('.cardio-row').forEach(row => {
+    const name = row.querySelector('.c-name').value;
+    if (name) out.push({
+      name, time: row.querySelector('.c-time').value, hrZone: row.querySelector('.c-hrzone').value,
+    });
+  });
+  return out;
+}
+function readExRows(container){
+  const out = [];
+  container.querySelectorAll('.ex-row').forEach(row => {
+    const name = row.querySelector('.x-name').value;
+    if (name) out.push({
+      name, setsCount: Number(row.querySelector('.x-sets').value) || 3,
+      restTime: row.querySelector('.x-rest').value,
+      videoLink: row.querySelector('.x-video').value, videoLink2: row.querySelector('.x-video2').value,
+      notes: row.querySelector('.x-notes').value,
+    });
+  });
+  return out;
+}
+function fillRowsFromPlan(warmupRows, exRows, notesEl, plan, cardioRows){
+  warmupRows.innerHTML = '';
+  exRows.innerHTML = '';
+  const warmupItems = (plan.warmup && plan.warmup.items) || [];
+  (warmupItems.length ? warmupItems : []).forEach(w => buildWarmupRow(warmupRows, w));
+  (plan.exercises && plan.exercises.length ? plan.exercises : []).forEach(ex => buildExRow(exRows, ex));
+  if (!warmupItems.length) buildWarmupRow(warmupRows);
+  if (!plan.exercises || !plan.exercises.length) buildExRow(exRows);
+  if (notesEl) notesEl.value = (plan.warmup && plan.warmup.notes) || '';
+  if (cardioRows){
+    cardioRows.innerHTML = '';
+    const cardioItems = plan.cardio || [];
+    (cardioItems.length ? cardioItems : []).forEach(c => buildCardioRow(cardioRows, c));
+    if (!cardioItems.length) buildCardioRow(cardioRows);
+  }
+}
+
+function openWorkoutPlanEditor(pw, clientId, exercises, warmup, cardio, onDone){
+  const overlay = openModal(`
+    <h3>Edit Workout Plan</h3>
+    <div class="stack-sm" style="margin-bottom:14px;border-bottom:1px solid var(--border);padding-bottom:14px;">
+      <div class="field-label">Load from a saved template</div>
+      <div class="row">
+        <select id="load-template-select" style="flex:2;"><option value="">— Select a template —</option></select>
+        <button type="button" class="btn btn-outline btn-sm" id="load-template-btn">Load</button>
+      </div>
+    </div>
+    <div class="stack-sm">
+      <h3 style="margin-top:0;">Warm Up</h3><div id="warmup-rows" class="stack-sm"></div>
+      <button type="button" class="btn btn-outline btn-sm" id="add-warmup-row">+ Add Warm-up</button>
+      <div class="stack-sm" style="margin-top:6px;"><div class="field-label">Warm-up notes (optional) — shown to the client</div><textarea id="warmup-notes"></textarea></div>
+    </div>
+    <div class="stack-sm" style="margin-top:16px;">
+      <h3 style="margin-top:0;">Cardio</h3><div id="cardio-rows" class="stack-sm"></div>
+      <button type="button" class="btn btn-outline btn-sm" id="add-cardio-row">+ Add Cardio</button>
+    </div>
+    <div class="stack-sm" style="margin-top:16px;"><h3>Exercises</h3><div id="ex-rows" class="stack-sm"></div><button type="button" class="btn btn-outline btn-sm" id="add-ex-row">+ Add Exercise</button></div>
+    <div class="row" style="margin-top:16px;">
+      <button class="btn" id="plan-save">Save Plan</button>
+      <button class="btn btn-outline" id="save-as-template-btn">Save as Template</button>
+      <button class="btn btn-outline" id="plan-cancel">Cancel</button>
+    </div>
+  `, true);
+  const warmupRows = overlay.querySelector('#warmup-rows');
+  const exRows = overlay.querySelector('#ex-rows');
+  const warmupNotesEl = overlay.querySelector('#warmup-notes');
+  const cardioRows = overlay.querySelector('#cardio-rows');
+
+  const warmupItems = (warmup && warmup.items) || [];
+  (warmupItems.length ? warmupItems : []).forEach(w => buildWarmupRow(warmupRows, w));
+  (exercises && exercises.length ? exercises : []).forEach(ex => buildExRow(exRows, ex));
+  if (!warmupItems.length) buildWarmupRow(warmupRows);
+  if (!exercises || !exercises.length) buildExRow(exRows);
+  warmupNotesEl.value = (warmup && warmup.notes) || '';
+
+  const cardioItems = cardio || [];
+  (cardioItems.length ? cardioItems : []).forEach(c => buildCardioRow(cardioRows, c));
+  if (!cardioItems.length) buildCardioRow(cardioRows);
+
+  overlay.querySelector('#add-warmup-row').addEventListener('click', () => buildWarmupRow(warmupRows));
+  overlay.querySelector('#add-cardio-row').addEventListener('click', () => buildCardioRow(cardioRows));
+  overlay.querySelector('#add-ex-row').addEventListener('click', () => buildExRow(exRows));
+  overlay.querySelector('#plan-cancel').addEventListener('click', () => overlay.remove());
+
+  const templateSelect = overlay.querySelector('#load-template-select');
+  let templatesCache = [];
+  api('listWorkoutTemplates', {password: pw}).then(r => {
+    if (r.ok){
+      templatesCache = r.templates;
+      r.templates.forEach(t => templateSelect.appendChild(el(`<option value="${t.id}">${t.name}</option>`)));
+    }
+  });
+  overlay.querySelector('#load-template-btn').addEventListener('click', () => {
+    const id = Number(templateSelect.value);
+    const t = templatesCache.find(x => x.id === id);
+    if (!t) return;
+    if (!confirm('Loading this template will replace the rows below with the template\'s exercises and warm-up. Continue?')) return;
+    fillRowsFromPlan(warmupRows, exRows, warmupNotesEl, t, cardioRows);
+  });
+
+  overlay.querySelector('#save-as-template-btn').addEventListener('click', () => {
+    openSaveTemplateModal(pw, readExRows(exRows), { items: readWarmupRows(warmupRows), notes: warmupNotesEl.value }, readCardioRows(cardioRows));
+  });
+
+  overlay.querySelector('#plan-save').addEventListener('click', async () => {
+    const newWarmup = { items: readWarmupRows(warmupRows), notes: warmupNotesEl.value };
+    const newExercises = readExRows(exRows);
+    const newCardio = readCardioRows(cardioRows);
+    const r = await api('saveWorkoutPlan', {password: pw, clientId, exercises: newExercises, warmup: newWarmup, cardio: newCardio});
+    if (r.ok){ overlay.remove(); onDone(); }
+  });
+}
+
+function openSaveTemplateModal(pw, exercises, warmup, cardio, onDone){
+  const overlay = openModal(`
+    <h3>Save as Template</h3>
+    <div class="stack-sm">
+      <div class="field-label">Template name</div>
+      <input type="text" id="tpl-name" placeholder="e.g. Beginner Full Body">
+      <div class="row" style="margin-top:10px;">
+        <button class="btn" id="tpl-save-btn">Save</button>
+        <button class="btn btn-outline" id="tpl-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  `);
+  overlay.querySelector('#tpl-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#tpl-save-btn').addEventListener('click', async () => {
+    const name = overlay.querySelector('#tpl-name').value.trim();
+    if (!name) return;
+    const r = await api('saveWorkoutTemplate', {password: pw, name, exercises, warmup, cardio});
+    if (r.ok){ overlay.remove(); if (onDone) onDone(); }
+  });
+}
+
+// ---- Plan Templates library (list / create / edit / delete) ----
+async function renderTemplatesLibrary(pw){
+  app.innerHTML = '';
+  const wrap = el(`<div class="wrap wide"></div>`);
+  wrap.appendChild(el(`
+    <div class="topbar"><h3>FitArc</h3><button class="btn btn-outline btn-sm" id="logout-btn">Logout</button></div>
+  `));
+  wrap.querySelector('#logout-btn').addEventListener('click', adminLogout);
+  wrap.appendChild(el(`
+    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h2 style="margin:0;">Plan Templates</h2>
+      <div class="row">
+        <button class="btn btn-outline btn-sm" id="back-to-dashboard-btn">← Back</button>
+        <button class="btn btn-sm" id="new-template-btn">+ New Template</button>
+      </div>
+    </div>
+  `));
+  wrap.querySelector('#back-to-dashboard-btn').addEventListener('click', () => renderAdminDashboard(pw));
+  const list = el(`<div class="stack"></div>`);
+  wrap.appendChild(list);
+  app.appendChild(wrap);
+
+  async function reload(){
+    list.innerHTML = '';
+    list.appendChild(el(`<div class="center-screen" style="min-height:100px;"><div class="spinner"></div></div>`));
+    const r = await api('listWorkoutTemplates', {password: pw});
+    list.innerHTML = '';
+    if (!r.ok || !r.templates.length){
+      list.appendChild(el(`<div class="card"><p>No templates saved yet. Build a plan once and click "+ New Template", or save a client's plan as a template from its plan editor.</p></div>`));
+      return;
+    }
+    r.templates.forEach(t => {
+      const card = el(`
+        <div class="card">
+          <div class="row" style="justify-content:space-between;align-items:center;">
+            <h3 style="margin:0;">${t.name}</h3>
+            <div class="row">
+              <button class="btn btn-outline btn-sm edit-tpl-btn">Edit</button>
+              <button class="btn btn-outline btn-sm delete-tpl-btn" style="color:var(--danger);border-color:var(--danger);">Delete</button>
+            </div>
+          </div>
+          <p class="field-hint" style="margin:6px 0 0;">${t.exercises.length} exercise(s) · ${t.warmup.items.length} warm-up item(s) · ${t.cardio.length} cardio item(s)</p>
+        </div>
+      `);
+      card.querySelector('.edit-tpl-btn').addEventListener('click', () => openTemplateEditor(pw, t, reload));
+      card.querySelector('.delete-tpl-btn').addEventListener('click', async () => {
+        if (!confirm(`Delete template "${t.name}"?`)) return;
+        await api('deleteWorkoutTemplate', {password: pw, templateId: t.id});
+        reload();
+      });
+      list.appendChild(card);
+    });
+  }
+  wrap.querySelector('#new-template-btn').addEventListener('click', () => openTemplateEditor(pw, null, reload));
+  reload();
+}
+
+function openTemplateEditor(pw, template, onDone){
+  const overlay = openModal(`
+    <h3>${template ? 'Edit Template' : 'New Template'}</h3>
+    <div class="stack-sm"><div class="field-label">Template name</div><input type="text" id="tpl-name" value="${(template && template.name) || ''}"></div>
+    <div class="stack-sm" style="margin-top:14px;">
+      <h3 style="margin-top:0;">Warm Up</h3><div id="warmup-rows" class="stack-sm"></div>
+      <button type="button" class="btn btn-outline btn-sm" id="add-warmup-row">+ Add Warm-up</button>
+      <div class="stack-sm" style="margin-top:6px;"><div class="field-label">Warm-up notes (optional) — shown to the client</div><textarea id="warmup-notes"></textarea></div>
+    </div>
+    <div class="stack-sm" style="margin-top:16px;">
+      <h3 style="margin-top:0;">Cardio</h3><div id="cardio-rows" class="stack-sm"></div>
+      <button type="button" class="btn btn-outline btn-sm" id="add-cardio-row">+ Add Cardio</button>
+    </div>
+    <div class="stack-sm" style="margin-top:16px;"><h3>Exercises</h3><div id="ex-rows" class="stack-sm"></div><button type="button" class="btn btn-outline btn-sm" id="add-ex-row">+ Add Exercise</button></div>
+    <div class="row" style="margin-top:16px;">
+      <button class="btn" id="tpl-save-btn">Save Template</button>
+      <button class="btn btn-outline" id="tpl-cancel-btn">Cancel</button>
+    </div>
+  `, true);
+  const warmupRows = overlay.querySelector('#warmup-rows');
+  const exRows = overlay.querySelector('#ex-rows');
+  const warmupNotesEl = overlay.querySelector('#warmup-notes');
+  const cardioRows = overlay.querySelector('#cardio-rows');
+  fillRowsFromPlan(warmupRows, exRows, warmupNotesEl, template || { warmup: { items: [], notes: '' }, exercises: [], cardio: [] }, cardioRows);
+  overlay.querySelector('#add-warmup-row').addEventListener('click', () => buildWarmupRow(warmupRows));
+  overlay.querySelector('#add-cardio-row').addEventListener('click', () => buildCardioRow(cardioRows));
+  overlay.querySelector('#add-ex-row').addEventListener('click', () => buildExRow(exRows));
+  overlay.querySelector('#tpl-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#tpl-save-btn').addEventListener('click', async () => {
+    const name = overlay.querySelector('#tpl-name').value.trim();
+    if (!name) return;
+    const newWarmup = { items: readWarmupRows(warmupRows), notes: warmupNotesEl.value };
+    const newExercises = readExRows(exRows);
+    const newCardio = readCardioRows(cardioRows);
+    const r = await api('saveWorkoutTemplate', {password: pw, templateId: template ? template.id : null, name, exercises: newExercises, warmup: newWarmup, cardio: newCardio});
+    if (r.ok){ overlay.remove(); onDone(); }
+  });
+}
+
+// ---- tab: diet plan editor ----
+async function renderDietAdminTab(content, pw, clientId){
+  content.innerHTML = '';
+  content.appendChild(el(`<div class="center-screen" style="min-height:160px;"><div class="spinner"></div></div>`));
+  let res;
+  try{ res = await api('getClientDietPlan', {password: pw, clientId}); }
+  catch(err){ return renderConnectionError(() => renderDietAdminTab(content, pw, clientId)); }
+  content.innerHTML = '';
+
+  content.appendChild(el(`<button class="btn btn-outline btn-sm" id="edit-diet-btn" style="margin-bottom:12px;">Edit Diet Plan</button>`));
+  content.querySelector('#edit-diet-btn').addEventListener('click', () => openDietPlanEditor(pw, clientId, res.days, () => renderDietAdminTab(content, pw, clientId)));
+
+  if (!res.days.length){
+    content.appendChild(el(`<div class="card"><p>No diet plan for this client yet.</p></div>`));
+    return;
+  }
+  res.days.forEach(day => {
+    const dayCard = el(`<div class="card"><h3>${day.title}</h3></div>`);
+    if (!day.meals.length) dayCard.appendChild(el(`<p class="field-hint">No meals.</p>`));
+    day.meals.forEach(m => dayCard.appendChild(el(`<p><strong>${m.title}:</strong> ${m.content}</p>`)));
+    content.appendChild(dayCard);
+  });
+}
+
+function openDietPlanEditor(pw, clientId, days, onDone){
+  const overlay = openModal(`
+    <h3>Edit Diet Plan</h3>
+    <div id="days-wrap" class="stack"></div>
+    <button type="button" class="btn btn-outline btn-sm" id="add-day-btn" style="margin-top:10px;">+ Add Day</button>
+    <div class="row" style="margin-top:16px;">
+      <button class="btn" id="diet-save">Save</button>
+      <button class="btn btn-outline" id="diet-cancel">Cancel</button>
+    </div>
+  `, true);
+  const daysWrap = overlay.querySelector('#days-wrap');
+
+  function addMealRow(mealsWrap, m){
+    const row = el(`
+      <div class="stack-sm meal-row" style="border:1px solid var(--border);border-radius:8px;padding:8px;">
+        <div class="row" style="align-items:center;">
+          <input type="text" class="m-title" placeholder="Meal name" value="${(m && m.title) || ''}" style="flex:2;">
+          <button type="button" class="icon-btn remove-row">×</button>
+        </div>
+        <textarea class="m-content" placeholder="Meal details">${(m && m.content) || ''}</textarea>
+      </div>
+    `);
+    row.querySelector('.remove-row').addEventListener('click', () => row.remove());
+    mealsWrap.appendChild(row);
+  }
+
+  function addDayBlock(day){
+    const block = el(`
+      <div class="stack-sm day-block" style="border:1px solid var(--border);border-radius:10px;padding:12px;">
+        <div class="row" style="align-items:center;">
+          <input type="text" class="d-title" placeholder="Day name (Day 1)" value="${(day && day.title) || ''}" style="flex:2;">
+          <button type="button" class="icon-btn remove-day">×</button>
+        </div>
+        <div class="meals-wrap stack-sm"></div>
+        <button type="button" class="btn btn-outline btn-sm add-meal-btn">+ Add Meal</button>
+      </div>
+    `);
+    const mealsWrap = block.querySelector('.meals-wrap');
+    (day && day.meals && day.meals.length ? day.meals : []).forEach(m => addMealRow(mealsWrap, m));
+    if (!day || !day.meals || !day.meals.length) addMealRow(mealsWrap);
+    block.querySelector('.add-meal-btn').addEventListener('click', () => addMealRow(mealsWrap));
+    block.querySelector('.remove-day').addEventListener('click', () => block.remove());
+    daysWrap.appendChild(block);
+  }
+  (days && days.length ? days : []).forEach(addDayBlock);
+  if (!days || !days.length) addDayBlock({title: 'Day 1'});
+
+  overlay.querySelector('#add-day-btn').addEventListener('click', () => addDayBlock({title: `Day ${daysWrap.children.length + 1}`}));
+  overlay.querySelector('#diet-cancel').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#diet-save').addEventListener('click', async () => {
+    const newDays = [];
+    daysWrap.querySelectorAll('.day-block').forEach(block => {
+      const title = block.querySelector('.d-title').value;
+      if (!title) return;
+      const meals = [];
+      block.querySelectorAll('.meal-row').forEach(row => {
+        const mTitle = row.querySelector('.m-title').value;
+        const mContent = row.querySelector('.m-content').value;
+        if (mTitle || mContent) meals.push({ title: mTitle, content: mContent });
+      });
+      newDays.push({ title, meals });
+    });
+    const r = await api('saveDietPlan', {password: pw, clientId, days: newDays});
+    if (r.ok){ overlay.remove(); onDone(); }
+  });
+}
+
+// ---- tab: subscription ----
+function renderSubscriptionAdminTab(content, pw, clientId, c){
+  content.innerHTML = '';
+  content.appendChild(el(`
+    <div class="card">
+      <h3>Subscription</h3>
+      <div class="detail-grid">
+        <div class="detail-item"><div class="field-hint">Type</div><div class="num" style="font-size:16px;">${planLabel(c.plan)}</div></div>
+        <div class="detail-item"><div class="field-hint">Subscription start</div><div class="num" style="font-size:16px;">${fmtDate(c.startDate)}</div></div>
+        <div class="detail-item"><div class="field-hint">End date</div><div class="num" style="font-size:16px;">${fmtDate(c.endDate)}</div></div>
+        <div class="detail-item"><div class="field-hint">Days remaining</div><div class="num">${c.daysRemaining}</div></div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <select id="renew-plan"><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option></select>
+        <button class="btn btn-sm" id="renew-btn">Renew Subscription (starts today)</button>
+      </div>
+    </div>
+  `));
+  content.querySelector('#renew-btn').addEventListener('click', async () => {
+    const plan = content.querySelector('#renew-plan').value;
+    const r = await api('renewSubscription', {password: pw, clientId, plan});
+    if (r.ok) renderClientDetail(pw, clientId);
+  });
+}
+</script>
+</body>
+</html>
