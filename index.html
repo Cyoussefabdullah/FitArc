@@ -301,7 +301,7 @@ function renderAssessmentView(clientId, name, driveLink){
 
   form.appendChild(el(`
     <div class="stack-sm" style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:14px;">
-      <div class="field-label">صور قبل البرنامج (قدام / خلف / جنب)</div>
+      <div class="field-label">الانبدي + صور جسمك (قدام / ورا / جنب)</div>
       ${driveLink
         ? `<a href="${driveLink}" target="_blank" rel="noopener" style="word-break:break-all;">${driveLink}</a>`
         : `<p style="margin:0;">الكابتن لسه مضفّش لينك الصور — هيتضاف قريب.</p>`}
@@ -314,7 +314,7 @@ function renderAssessmentView(clientId, name, driveLink){
   form.appendChild(el(`<div class="stack-sm"><div class="field-label">الوزن الحالي (كيلو)</div><input type="number" inputmode="decimal" step="0.1" min="20" max="400" id="a-weight" required></div>`));
   form.appendChild(el(`<div class="stack-sm"><div class="field-label">تاريخ مرضي / إصابات</div><textarea id="a-medical" required></textarea></div>`));
   form.appendChild(el(`<div class="stack-sm"><div class="field-label">هدفك من البرنامج</div><textarea id="a-goal" required></textarea></div>`));
-  form.appendChild(buildNumberScale('trainingDays', 'كام يوم في الأسبوع هتتمرن؟', 7, null));
+  form.appendChild(buildNumberScale('trainingDays', 'كام يوم في الأسبوع هتتمرن؟', 6, null));
   form.appendChild(el(`<div class="stack-sm"><div class="field-label">مكملات غذائية متوفرة؟</div><textarea id="a-supplements" required></textarea></div>`));
   form.appendChild(el(`<div class="stack-sm"><div class="field-label">أكلاتك المفضلة</div><textarea id="a-favfoods" required></textarea></div>`));
   form.appendChild(el(`<div class="stack-sm"><div class="field-label">أكلات مش بتحبها</div><textarea id="a-dislikefoods" required></textarea></div>`));
