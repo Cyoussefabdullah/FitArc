@@ -353,6 +353,24 @@ function sanitizeCardio(list) {
   })).filter(c => c.name);
 }
 
+// a workout "day" bundles its own exercises + warm-up + cardio -- the coach
+// splits each week's plan into as many days as they want (same free-form
+// count/titles convention as diet_plan.days), informed by the client's
+// stated trainingDays answer in First Assessment but never auto-linked to it.
+function sanitizeWorkoutDay(d) {
+  return {
+    title: String((d && d.title) || '').slice(0, 60),
+    exercises: sanitizeExercises(d && d.exercises),
+    warmup: sanitizeWarmup(d && d.warmup),
+    cardio: sanitizeCardio(d && d.cardio),
+  };
+}
+
+function sanitizeWorkoutDays(list) {
+  if (!Array.isArray(list)) return [];
+  return list.slice(0, 7).map(sanitizeWorkoutDay).filter(d => d.title);
+}
+
 function sanitizeMeals(list) {
   if (!Array.isArray(list)) return [];
   return list.slice(0, 20).map(m => ({
@@ -389,23 +407,21 @@ function sanitizeLogData(data, exercises) {
 }
 
 async function getWorkoutPlan(clientId) {
-  const rows = await sql`SELECT exercises, warmup, cardio FROM workout_plan WHERE client_id = ${clientId}`;
-  if (!rows.length) return { exercises: [], warmup: { items: [], notes: '' }, cardio: [] };
-  return { exercises: sanitizeExercises(rows[0].exercises), warmup: sanitizeWarmup(rows[0].warmup), cardio: sanitizeCardio(rows[0].cardio) };
+  const rows = await sql`SELECT days FROM workout_plan WHERE client_id = ${clientId}`;
+  if (!rows.length) return { days: [] };
+  return { days: sanitizeWorkoutDays(rows[0].days) };
 }
 
-async function saveWorkoutPlan(pw, clientId, exercises, warmup, cardio) {
+async function saveWorkoutPlan(pw, clientId, days) {
   if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
   if (!clientId) return { ok: false, error: 'invalid_id' };
-  const cleanExercises = sanitizeExercises(exercises);
-  const cleanWarmup = sanitizeWarmup(warmup);
-  const cleanCardio = sanitizeCardio(cardio);
+  const cleanDays = sanitizeWorkoutDays(days);
   await sql`
-    INSERT INTO workout_plan (client_id, exercises, warmup, cardio, updated_at)
-    VALUES (${clientId}, ${JSON.stringify(cleanExercises)}::jsonb, ${JSON.stringify(cleanWarmup)}::jsonb, ${JSON.stringify(cleanCardio)}::jsonb, now())
-    ON CONFLICT (client_id) DO UPDATE SET exercises = EXCLUDED.exercises, warmup = EXCLUDED.warmup, cardio = EXCLUDED.cardio, updated_at = now()
+    INSERT INTO workout_plan (client_id, days, updated_at)
+    VALUES (${clientId}, ${JSON.stringify(cleanDays)}::jsonb, now())
+    ON CONFLICT (client_id) DO UPDATE SET days = EXCLUDED.days, updated_at = now()
   `;
-  return { ok: true, exercises: cleanExercises, warmup: cleanWarmup, cardio: cleanCardio };
+  return { ok: true, days: cleanDays };
 }
 
 // Per-week plan: week 1 IS the base plan (workout_plan). Any other week falls
@@ -414,26 +430,19 @@ async function saveWorkoutPlan(pw, clientId, exercises, warmup, cardio) {
 async function getWorkoutPlanForWeek(clientId, weekNumber) {
   const base = await getWorkoutPlan(clientId);
   if (weekNumber === 1) return { ...base, isCustom: false };
-  const rows = await sql`SELECT exercises, warmup, cardio FROM workout_plan_weeks WHERE client_id = ${clientId} AND week_number = ${weekNumber}`;
+  const rows = await sql`SELECT days FROM workout_plan_weeks WHERE client_id = ${clientId} AND week_number = ${weekNumber}`;
   if (!rows.length) return { ...base, isCustom: false };
-  return {
-    exercises: sanitizeExercises(rows[0].exercises),
-    warmup: sanitizeWarmup(rows[0].warmup),
-    cardio: sanitizeCardio(rows[0].cardio),
-    isCustom: true,
-  };
+  return { days: sanitizeWorkoutDays(rows[0].days), isCustom: true };
 }
 
-// Builds { 1: {exercises, warmup, cardio, isCustom}, 2: {...}, ... } for every
-// week 1..totalWeeks in a single pass (one query for all overrides, instead of
-// one query per week) -- used by the "load everything at once" endpoints.
+// Builds { 1: {days, isCustom}, 2: {...}, ... } for every week 1..totalWeeks
+// in a single pass (one query for all overrides, instead of one query per
+// week) -- used by the "load everything at once" endpoints.
 async function buildPlansByWeek(clientId, totalWeeks, base) {
-  const overrideRows = await sql`SELECT week_number AS "weekNumber", exercises, warmup, cardio FROM workout_plan_weeks WHERE client_id = ${clientId}`;
+  const overrideRows = await sql`SELECT week_number AS "weekNumber", days FROM workout_plan_weeks WHERE client_id = ${clientId}`;
   const overridesByWeek = {};
   overrideRows.forEach(r => {
-    overridesByWeek[r.weekNumber] = {
-      exercises: sanitizeExercises(r.exercises), warmup: sanitizeWarmup(r.warmup), cardio: sanitizeCardio(r.cardio), isCustom: true,
-    };
+    overridesByWeek[r.weekNumber] = { days: sanitizeWorkoutDays(r.days), isCustom: true };
   });
   const plansByWeek = {};
   for (let w = 1; w <= totalWeeks; w++) {
@@ -442,22 +451,20 @@ async function buildPlansByWeek(clientId, totalWeeks, base) {
   return plansByWeek;
 }
 
-async function saveWorkoutPlanForWeek(pw, clientId, weekNumber, exercises, warmup, cardio) {
+async function saveWorkoutPlanForWeek(pw, clientId, weekNumber, days) {
   if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
   if (!clientId || !weekNumber) return { ok: false, error: 'invalid_input' };
   if (weekNumber === 1) {
-    const r = await saveWorkoutPlan(pw, clientId, exercises, warmup, cardio);
+    const r = await saveWorkoutPlan(pw, clientId, days);
     return r.ok ? { ...r, isCustom: false } : r;
   }
-  const cleanExercises = sanitizeExercises(exercises);
-  const cleanWarmup = sanitizeWarmup(warmup);
-  const cleanCardio = sanitizeCardio(cardio);
+  const cleanDays = sanitizeWorkoutDays(days);
   await sql`
-    INSERT INTO workout_plan_weeks (client_id, week_number, exercises, warmup, cardio, updated_at)
-    VALUES (${clientId}, ${weekNumber}, ${JSON.stringify(cleanExercises)}::jsonb, ${JSON.stringify(cleanWarmup)}::jsonb, ${JSON.stringify(cleanCardio)}::jsonb, now())
-    ON CONFLICT (client_id, week_number) DO UPDATE SET exercises = EXCLUDED.exercises, warmup = EXCLUDED.warmup, cardio = EXCLUDED.cardio, updated_at = now()
+    INSERT INTO workout_plan_weeks (client_id, week_number, days, updated_at)
+    VALUES (${clientId}, ${weekNumber}, ${JSON.stringify(cleanDays)}::jsonb, now())
+    ON CONFLICT (client_id, week_number) DO UPDATE SET days = EXCLUDED.days, updated_at = now()
   `;
-  return { ok: true, exercises: cleanExercises, warmup: cleanWarmup, cardio: cleanCardio, isCustom: true };
+  return { ok: true, days: cleanDays, isCustom: true };
 }
 
 // Removes a week's customization so it goes back to inheriting the base (Week 1) plan.
@@ -466,48 +473,44 @@ async function resetWorkoutPlanWeek(pw, clientId, weekNumber) {
   if (!clientId || !weekNumber || weekNumber === 1) return { ok: false, error: 'invalid_input' };
   await sql`DELETE FROM workout_plan_weeks WHERE client_id = ${clientId} AND week_number = ${weekNumber}`;
   const base = await getWorkoutPlan(clientId);
-  return { ok: true, exercises: base.exercises, warmup: base.warmup, cardio: base.cardio, isCustom: false };
+  return { ok: true, days: base.days, isCustom: false };
 }
 
 // ---------- Workout plan templates (reusable, saved independently of any client) ----------
 
 async function listWorkoutTemplates(pw) {
   if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
-  const rows = await sql`SELECT id, name, exercises, warmup, cardio, created_at AS "createdAt" FROM workout_templates ORDER BY created_at DESC`;
+  const rows = await sql`SELECT id, name, days, created_at AS "createdAt" FROM workout_templates ORDER BY created_at DESC`;
   return {
     ok: true,
     templates: rows.map(r => ({
       id: r.id,
       name: r.name,
-      exercises: sanitizeExercises(r.exercises),
-      warmup: sanitizeWarmup(r.warmup),
-      cardio: sanitizeCardio(r.cardio),
+      days: sanitizeWorkoutDays(r.days),
       createdAt: r.createdAt,
     })),
   };
 }
 
-async function saveWorkoutTemplate(pw, templateId, name, exercises, warmup, cardio) {
+async function saveWorkoutTemplate(pw, templateId, name, days) {
   if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
   const cleanName = String(name || '').slice(0, 120).trim();
   if (!cleanName) return { ok: false, error: 'name_required' };
-  const cleanExercises = sanitizeExercises(exercises);
-  const cleanWarmup = sanitizeWarmup(warmup);
-  const cleanCardio = sanitizeCardio(cardio);
+  const cleanDays = sanitizeWorkoutDays(days);
   if (templateId) {
     await sql`
       UPDATE workout_templates
-      SET name = ${cleanName}, exercises = ${JSON.stringify(cleanExercises)}::jsonb, warmup = ${JSON.stringify(cleanWarmup)}::jsonb, cardio = ${JSON.stringify(cleanCardio)}::jsonb
+      SET name = ${cleanName}, days = ${JSON.stringify(cleanDays)}::jsonb
       WHERE id = ${templateId}
     `;
-    return { ok: true, id: templateId, name: cleanName, exercises: cleanExercises, warmup: cleanWarmup, cardio: cleanCardio };
+    return { ok: true, id: templateId, name: cleanName, days: cleanDays };
   }
   const rows = await sql`
-    INSERT INTO workout_templates (name, exercises, warmup, cardio)
-    VALUES (${cleanName}, ${JSON.stringify(cleanExercises)}::jsonb, ${JSON.stringify(cleanWarmup)}::jsonb, ${JSON.stringify(cleanCardio)}::jsonb)
+    INSERT INTO workout_templates (name, days)
+    VALUES (${cleanName}, ${JSON.stringify(cleanDays)}::jsonb)
     RETURNING id
   `;
-  return { ok: true, id: rows[0].id, name: cleanName, exercises: cleanExercises, warmup: cleanWarmup, cardio: cleanCardio };
+  return { ok: true, id: rows[0].id, name: cleanName, days: cleanDays };
 }
 
 async function deleteWorkoutTemplate(pw, templateId) {
@@ -517,11 +520,23 @@ async function deleteWorkoutTemplate(pw, templateId) {
   return { ok: true };
 }
 
+// Returns a full week: every day in that week's plan, each with its own
+// exercises/warmup/cardio PLUS that day's logged data ("data", parallel to
+// that day's exercises) -- one round trip gives the whole week, since a
+// client/coach viewing a week typically flips between its few days.
 async function getWorkoutWeek(clientId, weekNumber) {
   const plan = await getWorkoutPlanForWeek(clientId, weekNumber);
-  const rows = await sql`SELECT data FROM workout_logs WHERE client_id = ${clientId} AND week_number = ${weekNumber}`;
-  const data = sanitizeLogData(rows.length ? rows[0].data : [], plan.exercises);
-  return { exercises: plan.exercises, warmup: plan.warmup, cardio: plan.cardio, data, isCustom: plan.isCustom };
+  const logRows = await sql`SELECT day_index AS "dayIndex", data FROM workout_logs WHERE client_id = ${clientId} AND week_number = ${weekNumber}`;
+  const logsByDay = {};
+  logRows.forEach(r => { logsByDay[r.dayIndex] = r.data; });
+  const days = plan.days.map((day, i) => ({
+    title: day.title,
+    exercises: day.exercises,
+    warmup: day.warmup,
+    cardio: day.cardio,
+    data: sanitizeLogData(logsByDay[i] || [], day.exercises),
+  }));
+  return { days, isCustom: plan.isCustom };
 }
 
 async function getWorkoutWeekAdmin(pw, clientId, weekNumber) {
@@ -536,26 +551,27 @@ async function getWorkoutWeekClient(clientId, weekNumber) {
   return { ok: true, ...result };
 }
 
-async function writeWorkoutLog(clientId, weekNumber, data) {
+async function writeWorkoutLog(clientId, weekNumber, dayIndex, data) {
   const plan = await getWorkoutPlanForWeek(clientId, weekNumber);
-  const clean = sanitizeLogData(data, plan.exercises);
+  const day = plan.days[dayIndex];
+  const clean = sanitizeLogData(data, day ? day.exercises : []);
   await sql`
-    INSERT INTO workout_logs (client_id, week_number, data, updated_at)
-    VALUES (${clientId}, ${weekNumber}, ${JSON.stringify(clean)}::jsonb, now())
-    ON CONFLICT (client_id, week_number) DO UPDATE SET data = EXCLUDED.data, updated_at = now()
+    INSERT INTO workout_logs (client_id, week_number, day_index, data, updated_at)
+    VALUES (${clientId}, ${weekNumber}, ${dayIndex}, ${JSON.stringify(clean)}::jsonb, now())
+    ON CONFLICT (client_id, week_number, day_index) DO UPDATE SET data = EXCLUDED.data, updated_at = now()
   `;
   return clean;
 }
 
-async function saveWorkoutLog(pw, clientId, weekNumber, data) {
+async function saveWorkoutLog(pw, clientId, weekNumber, dayIndex, data) {
   if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
-  if (!clientId || !weekNumber) return { ok: false, error: 'invalid_input' };
-  const clean = await writeWorkoutLog(clientId, weekNumber, data);
+  if (!clientId || !weekNumber || dayIndex == null) return { ok: false, error: 'invalid_input' };
+  const clean = await writeWorkoutLog(clientId, weekNumber, dayIndex, data);
   return { ok: true, data: clean };
 }
 
-async function logWorkout(clientId, weekNumber, data) {
-  if (!clientId || !weekNumber) return { ok: false, error: 'invalid_input' };
+async function logWorkout(clientId, weekNumber, dayIndex, data) {
+  if (!clientId || !weekNumber || dayIndex == null) return { ok: false, error: 'invalid_input' };
   const c = await getClientRow(clientId);
   if (!c) return { ok: false, error: 'invalid_id' };
   // mirror the client-side week lock: a client can only log week N once they've
@@ -565,8 +581,22 @@ async function logWorkout(clientId, weekNumber, data) {
   const checkinCountRows = await sql`SELECT COUNT(*)::int AS count FROM checkins WHERE client_id = ${clientId}`;
   const checkinsCount = checkinCountRows[0] ? checkinCountRows[0].count : 0;
   if (weekNumber > checkinsCount + 1) return { ok: false, error: 'week_locked' };
-  const clean = await writeWorkoutLog(clientId, weekNumber, data);
+  const clean = await writeWorkoutLog(clientId, weekNumber, dayIndex, data);
   return { ok: true, data: clean };
+}
+
+// logsByWeek[weekNumber][dayIndex] = array of {sets, note} parallel to
+// plansByWeek[weekNumber].days[dayIndex].exercises.
+async function buildLogsByWeek(clientId, plansByWeek) {
+  const rows = await sql`SELECT week_number AS "weekNumber", day_index AS "dayIndex", data FROM workout_logs WHERE client_id = ${clientId}`;
+  const logsByWeek = {};
+  rows.forEach(r => {
+    const weekPlan = plansByWeek[r.weekNumber];
+    const day = weekPlan && weekPlan.days[r.dayIndex];
+    if (!logsByWeek[r.weekNumber]) logsByWeek[r.weekNumber] = {};
+    logsByWeek[r.weekNumber][r.dayIndex] = sanitizeLogData(r.data, day ? day.exercises : []);
+  });
+  return logsByWeek;
 }
 
 async function getMyWorkoutAll(clientId) {
@@ -575,12 +605,10 @@ async function getMyWorkoutAll(clientId) {
   if (!c) return { ok: false, error: 'invalid_id' };
   const plan = await getWorkoutPlan(clientId);
   const plansByWeek = await buildPlansByWeek(clientId, c.total_weeks, plan);
-  const rows = await sql`SELECT week_number AS "weekNumber", data FROM workout_logs WHERE client_id = ${clientId}`;
-  const logsByWeek = {};
-  rows.forEach(r => { logsByWeek[r.weekNumber] = sanitizeLogData(r.data, (plansByWeek[r.weekNumber] || plan).exercises); });
+  const logsByWeek = await buildLogsByWeek(clientId, plansByWeek);
   const checkinCountRows = await sql`SELECT COUNT(*)::int AS count FROM checkins WHERE client_id = ${clientId}`;
   const checkinsCount = checkinCountRows[0] ? checkinCountRows[0].count : 0;
-  return { ok: true, exercises: plan.exercises, warmup: plan.warmup, cardio: plan.cardio, plansByWeek, totalWeeks: c.total_weeks, logsByWeek, checkinsCount };
+  return { ok: true, days: plan.days, plansByWeek, totalWeeks: c.total_weeks, logsByWeek, checkinsCount };
 }
 
 async function getClientWorkoutAll(pw, clientId) {
@@ -589,10 +617,8 @@ async function getClientWorkoutAll(pw, clientId) {
   if (!c) return { ok: false, error: 'invalid_id' };
   const plan = await getWorkoutPlan(clientId);
   const plansByWeek = await buildPlansByWeek(clientId, c.total_weeks, plan);
-  const rows = await sql`SELECT week_number AS "weekNumber", data FROM workout_logs WHERE client_id = ${clientId}`;
-  const logsByWeek = {};
-  rows.forEach(r => { logsByWeek[r.weekNumber] = sanitizeLogData(r.data, (plansByWeek[r.weekNumber] || plan).exercises); });
-  return { ok: true, exercises: plan.exercises, warmup: plan.warmup, cardio: plan.cardio, plansByWeek, totalWeeks: c.total_weeks, logsByWeek };
+  const logsByWeek = await buildLogsByWeek(clientId, plansByWeek);
+  return { ok: true, days: plan.days, plansByWeek, totalWeeks: c.total_weeks, logsByWeek };
 }
 
 // ---------- Diet plan (fixed, split into days) ----------
@@ -684,10 +710,10 @@ module.exports = async (req, res) => {
         out = await removeMonth(body.password, body.clientId);
         break;
       case 'saveWorkoutPlan':
-        out = await saveWorkoutPlan(body.password, body.clientId, body.exercises, body.warmup, body.cardio);
+        out = await saveWorkoutPlan(body.password, body.clientId, body.days);
         break;
       case 'saveWorkoutPlanForWeek':
-        out = await saveWorkoutPlanForWeek(body.password, body.clientId, body.weekNumber, body.exercises, body.warmup, body.cardio);
+        out = await saveWorkoutPlanForWeek(body.password, body.clientId, body.weekNumber, body.days);
         break;
       case 'resetWorkoutPlanWeek':
         out = await resetWorkoutPlanWeek(body.password, body.clientId, body.weekNumber);
@@ -696,7 +722,7 @@ module.exports = async (req, res) => {
         out = await listWorkoutTemplates(body.password);
         break;
       case 'saveWorkoutTemplate':
-        out = await saveWorkoutTemplate(body.password, body.templateId, body.name, body.exercises, body.warmup, body.cardio);
+        out = await saveWorkoutTemplate(body.password, body.templateId, body.name, body.days);
         break;
       case 'deleteWorkoutTemplate':
         out = await deleteWorkoutTemplate(body.password, body.templateId);
@@ -708,10 +734,10 @@ module.exports = async (req, res) => {
         out = await getWorkoutWeekClient(body.clientId, body.weekNumber);
         break;
       case 'saveWorkoutLog':
-        out = await saveWorkoutLog(body.password, body.clientId, body.weekNumber, body.data);
+        out = await saveWorkoutLog(body.password, body.clientId, body.weekNumber, body.dayIndex, body.data);
         break;
       case 'logWorkout':
-        out = await logWorkout(body.clientId, body.weekNumber, body.data);
+        out = await logWorkout(body.clientId, body.weekNumber, body.dayIndex, body.data);
         break;
       case 'getClientWorkoutAll':
         out = await getClientWorkoutAll(body.password, body.clientId);
