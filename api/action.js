@@ -2,7 +2,7 @@ const { neon } = require('@neondatabase/serverless');
 
 const sql = neon(process.env.DATABASE_URL);
 
-const ADMIN_PASSWORD = 'Coach2026Online!';
+const ADMIN_PASSWORD = 'Joe2002';
 
 const PLAN_DAYS = { monthly: 30, quarterly: 90 };
 const PLAN_WEEKS = { monthly: 4, quarterly: 12 };
