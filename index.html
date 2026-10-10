@@ -199,9 +199,9 @@ function renderClientPortal(clientId, data){
   wrap.appendChild(el(subscriptionCard(data)));
   wrap.appendChild(el(`
     <div class="tabs">
-      <button class="tab-btn active" id="tab-checkin">Check-in</button>
+      <button class="tab-btn active" id="tab-diet">Diet</button>
       <button class="tab-btn" id="tab-workout">Workout</button>
-      <button class="tab-btn" id="tab-diet">Diet</button>
+      <button class="tab-btn" id="tab-checkin">Check-in</button>
     </div>
   `));
   wrap.appendChild(el(`<div id="tab-content"></div>`));
@@ -217,7 +217,7 @@ function renderClientPortal(clientId, data){
   tabCheckin.addEventListener('click', () => { activate(tabCheckin); renderCheckinTab(content, clientId, data.driveLink); });
   tabWorkout.addEventListener('click', () => { activate(tabWorkout); renderClientWorkoutTab(content, clientId); });
   tabDiet.addEventListener('click', () => { activate(tabDiet); renderClientDietTab(content, clientId); });
-  renderCheckinTab(content, clientId, data.driveLink);
+  renderClientDietTab(content, clientId);
 }
 
 // ---------------- scale helpers ----------------
@@ -401,25 +401,23 @@ async function renderCheckinTab(content, clientId, driveLink){
   catch(err){ return renderConnectionError(() => renderCheckinTab(content, clientId, driveLink)); }
   content.innerHTML = '';
 
-  if (res.exists){
+  if (res.exists && !res.canSubmit){
     const k = res.data;
     if (driveLink){
       content.appendChild(el(`
         <div class="stack-sm" style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px;" dir="rtl">
-          <div class="field-label">الانبدي + صور جسمك (قدام / ورا / جنب)</div>
+          <div class="field-label">صور جسمك (قدام / ورا / جنب)</div>
           <a href="${driveLink}" target="_blank" rel="noopener" style="word-break:break-all;">${driveLink}</a>
         </div>
       `));
     }
     content.appendChild(el(`
       <div class="card" style="text-align:center;" dir="rtl">
-        <h3>متابعة الأسبوع ده اتسجلت ✓</h3>
+        <h3>آخر متابعة اتسجلت ✓</h3>
         <p>الوزن: ${fmtNum(k.weight)} كيلو · النوم: ${fmtNum(k.sleepHours)} ساعة · الخطوات: ${fmtNum(k.steps)}</p>
-        <p class="field-hint">تقدر تعدلها لحد ما الأسبوع يخلص.</p>
-        <button class="btn btn-outline" id="edit-checkin-btn">تعديل المتابعة</button>
+        <p class="field-hint">تم إرسالها، ومش ممكن تتعدل. تقدر تبعت المتابعة الجاية ابتداءً من ${fmtDate(res.nextAvailableDate)}.</p>
       </div>
     `));
-    content.querySelector('#edit-checkin-btn').addEventListener('click', () => renderCheckinForm(content, clientId, driveLink, k));
     return;
   }
   renderCheckinForm(content, clientId, driveLink, null);
@@ -432,7 +430,7 @@ function renderCheckinForm(content, clientId, driveLink, existing){
   if (driveLink){
     form.appendChild(el(`
       <div class="stack-sm" style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:14px;">
-        <div class="field-label">الانبدي + صور جسمك (قدام / ورا / جنب)</div>
+        <div class="field-label">صور جسمك (قدام / ورا / جنب)</div>
         <a href="${driveLink}" target="_blank" rel="noopener" style="word-break:break-all;">${driveLink}</a>
       </div>
     `));
@@ -482,7 +480,7 @@ function renderCheckinForm(content, clientId, driveLink, existing){
         clientId, weight: Number(weight), sleepHours: Number(sleepHours), energy: Number(energy),
         diet: Number(diet), stressLevel: Number(stressLevel), steps: Number(steps), problems, notes, weekRating: Number(weekRating),
       });
-      if (r.ok) renderCheckinTab(content, clientId, driveLink);
+      if (r.ok || r.error === 'already_submitted' || r.error === 'too_soon') renderCheckinTab(content, clientId, driveLink);
       else { btn.disabled = false; btn.textContent = existing ? 'حفظ التعديلات' : 'إرسال المتابعة'; }
     } catch(err){ renderConnectionError(() => renderCheckinForm(content, clientId, driveLink, existing)); }
   });
@@ -1011,7 +1009,7 @@ async function renderAssessmentCheckinTab(content, pw, clientId){
     ]);
   } catch(err){ return renderConnectionError(() => renderAssessmentCheckinTab(content, pw, clientId)); }
   content.innerHTML = '';
-  const myCheckins = (kRes.checkins || []).filter(k => k.clientId === clientId).sort((a,b) => (a.weekId||'').localeCompare(b.weekId||''));
+  const myCheckins = (kRes.checkins || []).filter(k => k.clientId === clientId).sort((a,b) => (a.weekNumber||0) - (b.weekNumber||0));
 
   if (aRes.exists){
     const a = aRes;
@@ -1065,7 +1063,7 @@ async function renderAssessmentCheckinTab(content, pw, clientId){
     myCheckins.slice().reverse().forEach(k => {
       checkinsCard.appendChild(el(`
         <div class="ex-card" style="margin-bottom:10px;">
-          <div class="field-hint">${k.weekId} · ${fmtDate(k.submittedAt)}</div>
+          <div class="field-hint">Check-in #${k.weekNumber} · ${fmtDate(k.submittedAt)}</div>
           <div class="detail-grid">
             <div class="detail-item"><div class="field-hint">Weight</div><div class="num">${fmtNum(k.weight)}</div></div>
             <div class="detail-item"><div class="field-hint">Sleep</div><div class="num">${fmtNum(k.sleepHours)}</div></div>
