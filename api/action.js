@@ -81,6 +81,7 @@ async function deleteClient(pw, clientId) {
   if (!clientId) return { ok: false, error: 'invalid_id' };
   await sql`DELETE FROM workout_logs WHERE client_id = ${clientId}`;
   await sql`DELETE FROM workout_plan WHERE client_id = ${clientId}`;
+  await sql`DELETE FROM workout_plan_weeks WHERE client_id = ${clientId}`;
   await sql`DELETE FROM diet_plan WHERE client_id = ${clientId}`;
   await sql`DELETE FROM checkins WHERE client_id = ${clientId}`;
   await sql`DELETE FROM assessments WHERE client_id = ${clientId}`;
@@ -299,6 +300,7 @@ async function removeMonth(pw, clientId) {
   const newTotal = c.total_weeks - 4;
   if (newTotal < 1) return { ok: false, error: 'cannot_remove_last_weeks' };
   await sql`DELETE FROM workout_logs WHERE client_id = ${clientId} AND week_number > ${newTotal}`;
+  await sql`DELETE FROM workout_plan_weeks WHERE client_id = ${clientId} AND week_number > ${newTotal}`;
   await sql`UPDATE clients SET total_weeks = ${newTotal} WHERE id = ${clientId}`;
   return { ok: true, totalWeeks: newTotal };
 }
@@ -406,6 +408,67 @@ async function saveWorkoutPlan(pw, clientId, exercises, warmup, cardio) {
   return { ok: true, exercises: cleanExercises, warmup: cleanWarmup, cardio: cleanCardio };
 }
 
+// Per-week plan: week 1 IS the base plan (workout_plan). Any other week falls
+// back to that same base plan unless the coach has specifically customized it
+// (a row in workout_plan_weeks), in which case that override is used instead.
+async function getWorkoutPlanForWeek(clientId, weekNumber) {
+  const base = await getWorkoutPlan(clientId);
+  if (weekNumber === 1) return { ...base, isCustom: false };
+  const rows = await sql`SELECT exercises, warmup, cardio FROM workout_plan_weeks WHERE client_id = ${clientId} AND week_number = ${weekNumber}`;
+  if (!rows.length) return { ...base, isCustom: false };
+  return {
+    exercises: sanitizeExercises(rows[0].exercises),
+    warmup: sanitizeWarmup(rows[0].warmup),
+    cardio: sanitizeCardio(rows[0].cardio),
+    isCustom: true,
+  };
+}
+
+// Builds { 1: {exercises, warmup, cardio, isCustom}, 2: {...}, ... } for every
+// week 1..totalWeeks in a single pass (one query for all overrides, instead of
+// one query per week) -- used by the "load everything at once" endpoints.
+async function buildPlansByWeek(clientId, totalWeeks, base) {
+  const overrideRows = await sql`SELECT week_number AS "weekNumber", exercises, warmup, cardio FROM workout_plan_weeks WHERE client_id = ${clientId}`;
+  const overridesByWeek = {};
+  overrideRows.forEach(r => {
+    overridesByWeek[r.weekNumber] = {
+      exercises: sanitizeExercises(r.exercises), warmup: sanitizeWarmup(r.warmup), cardio: sanitizeCardio(r.cardio), isCustom: true,
+    };
+  });
+  const plansByWeek = {};
+  for (let w = 1; w <= totalWeeks; w++) {
+    plansByWeek[w] = (w !== 1 && overridesByWeek[w]) ? overridesByWeek[w] : { ...base, isCustom: false };
+  }
+  return plansByWeek;
+}
+
+async function saveWorkoutPlanForWeek(pw, clientId, weekNumber, exercises, warmup, cardio) {
+  if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
+  if (!clientId || !weekNumber) return { ok: false, error: 'invalid_input' };
+  if (weekNumber === 1) {
+    const r = await saveWorkoutPlan(pw, clientId, exercises, warmup, cardio);
+    return r.ok ? { ...r, isCustom: false } : r;
+  }
+  const cleanExercises = sanitizeExercises(exercises);
+  const cleanWarmup = sanitizeWarmup(warmup);
+  const cleanCardio = sanitizeCardio(cardio);
+  await sql`
+    INSERT INTO workout_plan_weeks (client_id, week_number, exercises, warmup, cardio, updated_at)
+    VALUES (${clientId}, ${weekNumber}, ${JSON.stringify(cleanExercises)}::jsonb, ${JSON.stringify(cleanWarmup)}::jsonb, ${JSON.stringify(cleanCardio)}::jsonb, now())
+    ON CONFLICT (client_id, week_number) DO UPDATE SET exercises = EXCLUDED.exercises, warmup = EXCLUDED.warmup, cardio = EXCLUDED.cardio, updated_at = now()
+  `;
+  return { ok: true, exercises: cleanExercises, warmup: cleanWarmup, cardio: cleanCardio, isCustom: true };
+}
+
+// Removes a week's customization so it goes back to inheriting the base (Week 1) plan.
+async function resetWorkoutPlanWeek(pw, clientId, weekNumber) {
+  if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
+  if (!clientId || !weekNumber || weekNumber === 1) return { ok: false, error: 'invalid_input' };
+  await sql`DELETE FROM workout_plan_weeks WHERE client_id = ${clientId} AND week_number = ${weekNumber}`;
+  const base = await getWorkoutPlan(clientId);
+  return { ok: true, exercises: base.exercises, warmup: base.warmup, cardio: base.cardio, isCustom: false };
+}
+
 // ---------- Workout plan templates (reusable, saved independently of any client) ----------
 
 async function listWorkoutTemplates(pw) {
@@ -455,10 +518,10 @@ async function deleteWorkoutTemplate(pw, templateId) {
 }
 
 async function getWorkoutWeek(clientId, weekNumber) {
-  const plan = await getWorkoutPlan(clientId);
+  const plan = await getWorkoutPlanForWeek(clientId, weekNumber);
   const rows = await sql`SELECT data FROM workout_logs WHERE client_id = ${clientId} AND week_number = ${weekNumber}`;
   const data = sanitizeLogData(rows.length ? rows[0].data : [], plan.exercises);
-  return { exercises: plan.exercises, warmup: plan.warmup, cardio: plan.cardio, data };
+  return { exercises: plan.exercises, warmup: plan.warmup, cardio: plan.cardio, data, isCustom: plan.isCustom };
 }
 
 async function getWorkoutWeekAdmin(pw, clientId, weekNumber) {
@@ -474,7 +537,7 @@ async function getWorkoutWeekClient(clientId, weekNumber) {
 }
 
 async function writeWorkoutLog(clientId, weekNumber, data) {
-  const plan = await getWorkoutPlan(clientId);
+  const plan = await getWorkoutPlanForWeek(clientId, weekNumber);
   const clean = sanitizeLogData(data, plan.exercises);
   await sql`
     INSERT INTO workout_logs (client_id, week_number, data, updated_at)
@@ -511,12 +574,13 @@ async function getMyWorkoutAll(clientId) {
   const c = await getClientRow(clientId);
   if (!c) return { ok: false, error: 'invalid_id' };
   const plan = await getWorkoutPlan(clientId);
+  const plansByWeek = await buildPlansByWeek(clientId, c.total_weeks, plan);
   const rows = await sql`SELECT week_number AS "weekNumber", data FROM workout_logs WHERE client_id = ${clientId}`;
   const logsByWeek = {};
-  rows.forEach(r => { logsByWeek[r.weekNumber] = sanitizeLogData(r.data, plan.exercises); });
+  rows.forEach(r => { logsByWeek[r.weekNumber] = sanitizeLogData(r.data, (plansByWeek[r.weekNumber] || plan).exercises); });
   const checkinCountRows = await sql`SELECT COUNT(*)::int AS count FROM checkins WHERE client_id = ${clientId}`;
   const checkinsCount = checkinCountRows[0] ? checkinCountRows[0].count : 0;
-  return { ok: true, exercises: plan.exercises, warmup: plan.warmup, cardio: plan.cardio, totalWeeks: c.total_weeks, logsByWeek, checkinsCount };
+  return { ok: true, exercises: plan.exercises, warmup: plan.warmup, cardio: plan.cardio, plansByWeek, totalWeeks: c.total_weeks, logsByWeek, checkinsCount };
 }
 
 async function getClientWorkoutAll(pw, clientId) {
@@ -524,10 +588,11 @@ async function getClientWorkoutAll(pw, clientId) {
   const c = await getClientRow(clientId);
   if (!c) return { ok: false, error: 'invalid_id' };
   const plan = await getWorkoutPlan(clientId);
+  const plansByWeek = await buildPlansByWeek(clientId, c.total_weeks, plan);
   const rows = await sql`SELECT week_number AS "weekNumber", data FROM workout_logs WHERE client_id = ${clientId}`;
   const logsByWeek = {};
-  rows.forEach(r => { logsByWeek[r.weekNumber] = sanitizeLogData(r.data, plan.exercises); });
-  return { ok: true, exercises: plan.exercises, warmup: plan.warmup, cardio: plan.cardio, totalWeeks: c.total_weeks, logsByWeek };
+  rows.forEach(r => { logsByWeek[r.weekNumber] = sanitizeLogData(r.data, (plansByWeek[r.weekNumber] || plan).exercises); });
+  return { ok: true, exercises: plan.exercises, warmup: plan.warmup, cardio: plan.cardio, plansByWeek, totalWeeks: c.total_weeks, logsByWeek };
 }
 
 // ---------- Diet plan (fixed, split into days) ----------
@@ -620,6 +685,12 @@ module.exports = async (req, res) => {
         break;
       case 'saveWorkoutPlan':
         out = await saveWorkoutPlan(body.password, body.clientId, body.exercises, body.warmup, body.cardio);
+        break;
+      case 'saveWorkoutPlanForWeek':
+        out = await saveWorkoutPlanForWeek(body.password, body.clientId, body.weekNumber, body.exercises, body.warmup, body.cardio);
+        break;
+      case 'resetWorkoutPlanWeek':
+        out = await resetWorkoutPlanWeek(body.password, body.clientId, body.weekNumber);
         break;
       case 'listWorkoutTemplates':
         out = await listWorkoutTemplates(body.password);
