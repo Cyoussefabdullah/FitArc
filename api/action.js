@@ -531,6 +531,52 @@ async function deleteWorkoutTemplate(pw, templateId) {
   return { ok: true };
 }
 
+// ---------- Warm-up templates (reusable warm-up tables, e.g. "Legs Warmup",
+// "Upper Warmup" -- saved independently of any client or day, loaded into
+// any training day's Warm Up section) ----------
+
+async function listWarmupTemplates(pw) {
+  if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
+  const rows = await sql`SELECT id, name, warmup, created_at AS "createdAt" FROM warmup_templates ORDER BY created_at DESC`;
+  return {
+    ok: true,
+    templates: rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      warmup: sanitizeWarmup(r.warmup),
+      createdAt: r.createdAt,
+    })),
+  };
+}
+
+async function saveWarmupTemplate(pw, templateId, name, warmup) {
+  if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
+  const cleanName = String(name || '').slice(0, 120).trim();
+  if (!cleanName) return { ok: false, error: 'name_required' };
+  const cleanWarmup = sanitizeWarmup(warmup);
+  if (templateId) {
+    await sql`
+      UPDATE warmup_templates
+      SET name = ${cleanName}, warmup = ${JSON.stringify(cleanWarmup)}::jsonb
+      WHERE id = ${templateId}
+    `;
+    return { ok: true, id: templateId, name: cleanName, warmup: cleanWarmup };
+  }
+  const rows = await sql`
+    INSERT INTO warmup_templates (name, warmup)
+    VALUES (${cleanName}, ${JSON.stringify(cleanWarmup)}::jsonb)
+    RETURNING id
+  `;
+  return { ok: true, id: rows[0].id, name: cleanName, warmup: cleanWarmup };
+}
+
+async function deleteWarmupTemplate(pw, templateId) {
+  if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
+  if (!templateId) return { ok: false, error: 'invalid_id' };
+  await sql`DELETE FROM warmup_templates WHERE id = ${templateId}`;
+  return { ok: true };
+}
+
 // Returns a full week: every day in that week's plan, each with its own
 // exercises/warmup/cardio PLUS that day's logged data ("data", parallel to
 // that day's exercises) -- one round trip gives the whole week, since a
@@ -737,6 +783,15 @@ module.exports = async (req, res) => {
         break;
       case 'deleteWorkoutTemplate':
         out = await deleteWorkoutTemplate(body.password, body.templateId);
+        break;
+      case 'listWarmupTemplates':
+        out = await listWarmupTemplates(body.password);
+        break;
+      case 'saveWarmupTemplate':
+        out = await saveWarmupTemplate(body.password, body.templateId, body.name, body.warmup);
+        break;
+      case 'deleteWarmupTemplate':
+        out = await deleteWarmupTemplate(body.password, body.templateId);
         break;
       case 'getWorkoutWeekAdmin':
         out = await getWorkoutWeekAdmin(body.password, body.clientId, body.weekNumber);
