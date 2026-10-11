@@ -1364,6 +1364,8 @@ function buildWarmupRow(container, w){
       <div class="row" style="align-items:center;">
         <input type="text" class="w-name" placeholder="Exercise name" value="${(w && w.name) || ''}" style="flex:2;">
         <input type="text" class="w-sets" placeholder="Sets" value="${(w && w.sets) || ''}" style="max-width:70px;">
+        <button type="button" class="icon-btn move-up-row" title="Move up">↑</button>
+        <button type="button" class="icon-btn move-down-row" title="Move down">↓</button>
         <button type="button" class="icon-btn remove-row">×</button>
       </div>
       <input type="text" class="w-reptime" placeholder="Reps / time (e.g. 30 sec)" value="${(w && w.repTime) || ''}">
@@ -1371,6 +1373,14 @@ function buildWarmupRow(container, w){
     </div>
   `);
   row.querySelector('.remove-row').addEventListener('click', () => row.remove());
+  row.querySelector('.move-up-row').addEventListener('click', () => {
+    const prev = row.previousElementSibling;
+    if (prev) row.parentNode.insertBefore(row, prev);
+  });
+  row.querySelector('.move-down-row').addEventListener('click', () => {
+    const next = row.nextElementSibling;
+    if (next) row.parentNode.insertBefore(next, row);
+  });
   container.appendChild(row);
   return row;
 }
@@ -1380,6 +1390,8 @@ function buildExRow(container, ex){
       <div class="row" style="align-items:center;">
         <input type="text" class="x-name" placeholder="Exercise name" value="${(ex && ex.name) || ''}" style="flex:2;">
         <input type="number" class="x-sets" placeholder="Sets" min="1" max="12" value="${(ex && ex.setsCount) || 3}" style="max-width:110px;">
+        <button type="button" class="icon-btn move-up-row" title="Move up">↑</button>
+        <button type="button" class="icon-btn move-down-row" title="Move down">↓</button>
         <button type="button" class="icon-btn remove-row">×</button>
       </div>
       <div class="row" style="align-items:center;">
@@ -1393,6 +1405,14 @@ function buildExRow(container, ex){
     </div>
   `);
   row.querySelector('.remove-row').addEventListener('click', () => row.remove());
+  row.querySelector('.move-up-row').addEventListener('click', () => {
+    const prev = row.previousElementSibling;
+    if (prev) row.parentNode.insertBefore(row, prev);
+  });
+  row.querySelector('.move-down-row').addEventListener('click', () => {
+    const next = row.nextElementSibling;
+    if (next) row.parentNode.insertBefore(next, row);
+  });
   container.appendChild(row);
   return row;
 }
