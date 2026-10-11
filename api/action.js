@@ -398,6 +398,12 @@ function sanitizeDietDays(list) {
   })).filter(d => d.title);
 }
 
+// General diet-plan notes -- free text set by the coach, shown to the client
+// above their diet days, NOT tied to any one day (e.g. "اشرب 3 لتر مية في اليوم").
+function sanitizeDietNotes(notes) {
+  return String(notes || '').slice(0, 2000);
+}
+
 function sanitizeLogData(data, exercises) {
   const out = [];
   for (let i = 0; i < exercises.length; i++) {
@@ -681,34 +687,35 @@ async function getClientWorkoutAll(pw, clientId) {
 // ---------- Diet plan (fixed, split into days) ----------
 
 async function getDietPlan(clientId) {
-  const rows = await sql`SELECT days FROM diet_plan WHERE client_id = ${clientId}`;
-  return rows.length ? sanitizeDietDays(rows[0].days) : [];
+  const rows = await sql`SELECT days, notes FROM diet_plan WHERE client_id = ${clientId}`;
+  return rows.length ? { days: sanitizeDietDays(rows[0].days), notes: sanitizeDietNotes(rows[0].notes) } : { days: [], notes: '' };
 }
 
-async function saveDietPlan(pw, clientId, days) {
+async function saveDietPlan(pw, clientId, days, notes) {
   if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
   if (!clientId) return { ok: false, error: 'invalid_id' };
-  const clean = sanitizeDietDays(days);
+  const cleanDays = sanitizeDietDays(days);
+  const cleanNotes = sanitizeDietNotes(notes);
   await sql`
-    INSERT INTO diet_plan (client_id, days, updated_at)
-    VALUES (${clientId}, ${JSON.stringify(clean)}::jsonb, now())
-    ON CONFLICT (client_id) DO UPDATE SET days = EXCLUDED.days, updated_at = now()
+    INSERT INTO diet_plan (client_id, days, notes, updated_at)
+    VALUES (${clientId}, ${JSON.stringify(cleanDays)}::jsonb, ${cleanNotes}, now())
+    ON CONFLICT (client_id) DO UPDATE SET days = EXCLUDED.days, notes = EXCLUDED.notes, updated_at = now()
   `;
-  return { ok: true, days: clean };
+  return { ok: true, days: cleanDays, notes: cleanNotes };
 }
 
 async function getClientDietPlan(pw, clientId) {
   if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
-  const days = await getDietPlan(clientId);
-  return { ok: true, days };
+  const plan = await getDietPlan(clientId);
+  return { ok: true, days: plan.days, notes: plan.notes };
 }
 
 async function getMyDietPlan(clientId) {
   if (!clientId) return { ok: false, error: 'invalid_id' };
   const c = await getClientRow(clientId);
   if (!c) return { ok: false, error: 'invalid_id' };
-  const days = await getDietPlan(clientId);
-  return { ok: true, days };
+  const plan = await getDietPlan(clientId);
+  return { ok: true, days: plan.days, notes: plan.notes };
 }
 
 // ---------- Router ----------
@@ -812,7 +819,7 @@ module.exports = async (req, res) => {
         out = await getMyWorkoutAll(body.clientId);
         break;
       case 'saveDietPlan':
-        out = await saveDietPlan(body.password, body.clientId, body.days);
+        out = await saveDietPlan(body.password, body.clientId, body.days, body.notes);
         break;
       case 'getClientDietPlan':
         out = await getClientDietPlan(body.password, body.clientId);
