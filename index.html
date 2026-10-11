@@ -553,6 +553,17 @@ function buildVideoButtonsHtml(ex){
   return html;
 }
 
+// target rep range the coach sets per exercise (e.g. "8-12 reps") -- shown
+// read-only next to Rest Time, not logged weekly (the client's actual reps
+// performed are logged separately, per set).
+function repRangeText(ex){
+  const min = ex && ex.repsMin, max = ex && ex.repsMax;
+  if (min && max) return `${min}-${max} reps`;
+  if (min) return `${min}+ reps`;
+  if (max) return `Up to ${max} reps`;
+  return '';
+}
+
 // ---------------- warm-up section: collapsible table (exercise / sets / reps-time / video), coach-authored only ----------------
 function buildWarmupSection(warmup){
   const list = (warmup && warmup.items) || [];
@@ -739,6 +750,7 @@ async function renderClientWorkoutTab(content, clientId){
       const card = el(`
         <div class="ex-card">
           <div class="ex-card-head"><h3 style="margin:0;">${ex.name}</h3><div class="row" style="gap:6px;flex-shrink:0;">${videoBtnHtml}</div></div>
+          ${(ex.repsMin || ex.repsMax) ? `<p class="field-hint" style="margin-top:-4px;">${repRangeText(ex)}</p>` : ''}
           ${ex.restTime ? `<p class="field-hint" style="margin-top:-4px;">Rest: ${ex.restTime}</p>` : ''}
           ${ex.notes ? `<p class="field-hint" style="margin:2px 0 0;">${ex.notes}</p>` : ''}
           <div class="sets-area"></div>
@@ -1279,6 +1291,7 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
       const card = el(`
         <div class="ex-card">
           <div class="ex-card-head"><h3 style="margin:0;">${ex.name}</h3><div class="row" style="gap:6px;flex-shrink:0;">${videoBtnHtml}</div></div>
+          ${(ex.repsMin || ex.repsMax) ? `<p class="field-hint" style="margin-top:-4px;">${repRangeText(ex)}</p>` : ''}
           ${ex.restTime ? `<p class="field-hint" style="margin-top:-4px;">Rest: ${ex.restTime}</p>` : ''}
           ${ex.notes ? `<p class="field-hint" style="margin:2px 0 0;">${ex.notes}</p>` : ''}
           <div class="sets-area"></div>
@@ -1359,6 +1372,10 @@ function buildExRow(container, ex){
         <input type="number" class="x-sets" placeholder="Sets" min="1" max="12" value="${(ex && ex.setsCount) || 3}" style="max-width:110px;">
         <button type="button" class="icon-btn remove-row">×</button>
       </div>
+      <div class="row" style="align-items:center;">
+        <input type="number" class="x-reps-min" placeholder="Reps from (optional)" min="1" max="100" value="${(ex && ex.repsMin) || ''}">
+        <input type="number" class="x-reps-max" placeholder="Reps to (optional)" min="1" max="100" value="${(ex && ex.repsMax) || ''}">
+      </div>
       <input type="text" class="x-rest" placeholder="Rest time (e.g. 60-90 sec, optional)" value="${(ex && ex.restTime) || ''}">
       <input type="text" class="x-video" placeholder="Video link (optional)" value="${(ex && ex.videoLink) || ''}">
       <input type="text" class="x-video2" placeholder="Video link 2 (optional — for supersets)" value="${(ex && ex.videoLink2) || ''}">
@@ -1412,6 +1429,7 @@ function readExRows(container){
     const name = row.querySelector('.x-name').value;
     if (name) out.push({
       name, setsCount: Number(row.querySelector('.x-sets').value) || 3,
+      repsMin: row.querySelector('.x-reps-min').value, repsMax: row.querySelector('.x-reps-max').value,
       restTime: row.querySelector('.x-rest').value,
       videoLink: row.querySelector('.x-video').value, videoLink2: row.querySelector('.x-video2').value,
       notes: row.querySelector('.x-notes').value,
