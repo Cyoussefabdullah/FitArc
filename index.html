@@ -1440,7 +1440,7 @@ function readExRows(container){
 // ---- shared "workout day" block (one training day's warm-up + cardio +
 // exercises) -- used by both the per-week plan editor and the template
 // editor, since a template IS the same day-split shape as a week's plan.
-function buildWorkoutDayBlock(daysWrap, day){
+function buildWorkoutDayBlock(daysWrap, day, pw){
   const block = el(`
     <div class="stack-sm workout-day-block" style="border:1px solid var(--border);border-radius:10px;padding:12px;">
       <div class="row" style="align-items:center;">
@@ -1448,9 +1448,18 @@ function buildWorkoutDayBlock(daysWrap, day){
         <button type="button" class="icon-btn remove-day">×</button>
       </div>
       <div class="stack-sm" style="margin-top:10px;">
-        <h3 style="margin:0;">Warm Up</h3><div class="warmup-rows stack-sm"></div>
+        <h3 style="margin:0;">Warm Up</h3>
+        <div class="row" style="align-items:center;">
+          <select class="warmup-tpl-select" style="flex:2;"><option value="">— Load a saved warm-up —</option></select>
+          <button type="button" class="btn btn-outline btn-sm load-warmup-tpl-btn">Load</button>
+        </div>
+        <div class="warmup-rows stack-sm"></div>
         <button type="button" class="btn btn-outline btn-sm add-warmup-row">+ Add Warm-up</button>
         <div class="stack-sm" style="margin-top:6px;"><div class="field-label">Warm-up notes (optional) — shown to the client</div><textarea class="warmup-notes"></textarea></div>
+        <div class="row" style="margin-top:4px;">
+          <button type="button" class="btn btn-outline btn-sm save-warmup-tpl-btn">Save this Warm-up as...</button>
+          <button type="button" class="btn btn-outline btn-sm manage-warmup-tpl-btn">Manage Warm-up Templates</button>
+        </div>
       </div>
       <div class="stack-sm" style="margin-top:16px;">
         <h3 style="margin:0;">Cardio</h3><div class="cardio-rows stack-sm"></div>
@@ -1463,6 +1472,7 @@ function buildWorkoutDayBlock(daysWrap, day){
   const exRows = block.querySelector('.ex-rows');
   const warmupNotesEl = block.querySelector('.warmup-notes');
   const cardioRows = block.querySelector('.cardio-rows');
+  const warmupTplSelect = block.querySelector('.warmup-tpl-select');
 
   const warmupItems = (day && day.warmup && day.warmup.items) || [];
   warmupItems.forEach(w => buildWarmupRow(warmupRows, w));
@@ -1477,12 +1487,120 @@ function buildWorkoutDayBlock(daysWrap, day){
   exItems.forEach(ex => buildExRow(exRows, ex));
   if (!exItems.length) buildExRow(exRows);
 
+  // warm-up templates: a separate, reusable library of warm-up tables (e.g.
+  // "Legs Warmup", "Upper Warmup") the coach can load into THIS day's Warm
+  // Up section alone -- independent of exercises/cardio and of the full
+  // day-split "Plan Templates" library.
+  let warmupTplCache = [];
+  function loadWarmupTplOptions(){
+    warmupTplSelect.innerHTML = '<option value="">— Load a saved warm-up —</option>';
+    api('listWarmupTemplates', {password: pw}).then(r => {
+      if (r.ok){
+        warmupTplCache = r.templates;
+        r.templates.forEach(t => warmupTplSelect.appendChild(el(`<option value="${t.id}">${t.name}</option>`)));
+      }
+    });
+  }
+  loadWarmupTplOptions();
+
+  // other day-blocks sharing this same daysWrap keep their own warm-up
+  // template picker, each with its own cached list -- saving/renaming/
+  // deleting a warm-up template from ANY day's "Save as.../Manage" should
+  // refresh every day's picker in this editor, not just the one that
+  // triggered it, so the list never goes stale until the editor is reopened.
+  if (!daysWrap._warmupTplRefreshers) daysWrap._warmupTplRefreshers = [];
+  daysWrap._warmupTplRefreshers.push(loadWarmupTplOptions);
+  function refreshAllWarmupTplPickers(){
+    (daysWrap._warmupTplRefreshers || []).forEach(fn => fn());
+  }
+
+  block.querySelector('.load-warmup-tpl-btn').addEventListener('click', () => {
+    const id = Number(warmupTplSelect.value);
+    const t = warmupTplCache.find(x => x.id === id);
+    if (!t) return;
+    if (!confirm('Loading this warm-up will replace the warm-up rows and notes for this day. Continue?')) return;
+    warmupRows.innerHTML = '';
+    const items = (t.warmup && t.warmup.items) || [];
+    items.forEach(w => buildWarmupRow(warmupRows, w));
+    if (!items.length) buildWarmupRow(warmupRows);
+    warmupNotesEl.value = (t.warmup && t.warmup.notes) || '';
+  });
+
+  block.querySelector('.save-warmup-tpl-btn').addEventListener('click', () => {
+    openSaveWarmupTemplateModal(pw, { items: readWarmupRows(warmupRows), notes: warmupNotesEl.value }, refreshAllWarmupTplPickers);
+  });
+
+  block.querySelector('.manage-warmup-tpl-btn').addEventListener('click', () => {
+    openManageWarmupTemplatesModal(pw, refreshAllWarmupTplPickers);
+  });
+
   block.querySelector('.add-warmup-row').addEventListener('click', () => buildWarmupRow(warmupRows));
   block.querySelector('.add-cardio-row').addEventListener('click', () => buildCardioRow(cardioRows));
   block.querySelector('.add-ex-row').addEventListener('click', () => buildExRow(exRows));
-  block.querySelector('.remove-day').addEventListener('click', () => block.remove());
+  block.querySelector('.remove-day').addEventListener('click', () => {
+    block.remove();
+    if (daysWrap._warmupTplRefreshers) {
+      daysWrap._warmupTplRefreshers = daysWrap._warmupTplRefreshers.filter(fn => fn !== loadWarmupTplOptions);
+    }
+  });
   daysWrap.appendChild(block);
   return block;
+}
+
+function openSaveWarmupTemplateModal(pw, warmup, onDone){
+  const overlay = openModal(`
+    <h3>Save Warm-up as Template</h3>
+    <div class="stack-sm">
+      <div class="field-label">Warm-up template name</div>
+      <input type="text" id="wtpl-name" placeholder="e.g. Legs Warmup">
+      <div class="row" style="margin-top:10px;">
+        <button class="btn" id="wtpl-save-btn">Save</button>
+        <button class="btn btn-outline" id="wtpl-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  `);
+  overlay.querySelector('#wtpl-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#wtpl-save-btn').addEventListener('click', async () => {
+    const name = overlay.querySelector('#wtpl-name').value.trim();
+    if (!name) return;
+    const r = await api('saveWarmupTemplate', {password: pw, name, warmup});
+    if (r.ok){ overlay.remove(); if (onDone) onDone(); }
+  });
+}
+
+function openManageWarmupTemplatesModal(pw, onDone){
+  const overlay = openModal(`
+    <h3>Manage Warm-up Templates</h3>
+    <div id="wtpl-list" class="stack-sm"></div>
+    <div class="row" style="margin-top:14px;"><button class="btn btn-outline" id="wtpl-close-btn">Close</button></div>
+  `);
+  const list = overlay.querySelector('#wtpl-list');
+  async function reload(){
+    list.innerHTML = '<div class="field-hint">Loading…</div>';
+    const r = await api('listWarmupTemplates', {password: pw});
+    list.innerHTML = '';
+    if (!r.ok || !r.templates.length){
+      list.appendChild(el(`<p class="field-hint">No warm-up templates saved yet.</p>`));
+      return;
+    }
+    r.templates.forEach(t => {
+      const row = el(`
+        <div class="row" style="justify-content:space-between;align-items:center;border-top:1px solid var(--border);padding-top:8px;">
+          <span>${t.name} <span class="field-hint">(${(t.warmup.items || []).length} item(s))</span></span>
+          <button type="button" class="btn btn-outline btn-sm delete-wtpl-btn" style="color:var(--danger);border-color:var(--danger);">Delete</button>
+        </div>
+      `);
+      row.querySelector('.delete-wtpl-btn').addEventListener('click', async () => {
+        if (!confirm(`Delete warm-up template "${t.name}"?`)) return;
+        await api('deleteWarmupTemplate', {password: pw, templateId: t.id});
+        reload();
+        if (onDone) onDone();
+      });
+      list.appendChild(row);
+    });
+  }
+  reload();
+  overlay.querySelector('#wtpl-close-btn').addEventListener('click', () => { overlay.remove(); if (onDone) onDone(); });
 }
 
 function readWorkoutDays(daysWrap){
@@ -1520,10 +1638,10 @@ function openWorkoutPlanEditor(pw, clientId, weekNumber, days, onDone){
   `, true);
   const daysWrap = overlay.querySelector('#days-wrap');
 
-  (days && days.length ? days : []).forEach(d => buildWorkoutDayBlock(daysWrap, d));
-  if (!days || !days.length) buildWorkoutDayBlock(daysWrap, {title: 'Day 1'});
+  (days && days.length ? days : []).forEach(d => buildWorkoutDayBlock(daysWrap, d, pw));
+  if (!days || !days.length) buildWorkoutDayBlock(daysWrap, {title: 'Day 1'}, pw);
 
-  overlay.querySelector('#add-day-btn').addEventListener('click', () => buildWorkoutDayBlock(daysWrap, {title: `Day ${daysWrap.children.length + 1}`}));
+  overlay.querySelector('#add-day-btn').addEventListener('click', () => buildWorkoutDayBlock(daysWrap, {title: `Day ${daysWrap.children.length + 1}`}, pw));
   overlay.querySelector('#plan-cancel').addEventListener('click', () => overlay.remove());
 
   const templateSelect = overlay.querySelector('#load-template-select');
@@ -1540,7 +1658,7 @@ function openWorkoutPlanEditor(pw, clientId, weekNumber, days, onDone){
     if (!t) return;
     if (!confirm('Loading this template will replace all the days below with the template\'s days. Continue?')) return;
     daysWrap.innerHTML = '';
-    (t.days && t.days.length ? t.days : [{title: 'Day 1'}]).forEach(d => buildWorkoutDayBlock(daysWrap, d));
+    (t.days && t.days.length ? t.days : [{title: 'Day 1'}]).forEach(d => buildWorkoutDayBlock(daysWrap, d, pw));
   });
 
   overlay.querySelector('#save-as-template-btn').addEventListener('click', () => {
@@ -1645,10 +1763,10 @@ function openTemplateEditor(pw, template, onDone){
   `, true);
   const daysWrap = overlay.querySelector('#days-wrap');
   const days = (template && template.days) || [];
-  (days.length ? days : []).forEach(d => buildWorkoutDayBlock(daysWrap, d));
-  if (!days.length) buildWorkoutDayBlock(daysWrap, {title: 'Day 1'});
+  (days.length ? days : []).forEach(d => buildWorkoutDayBlock(daysWrap, d, pw));
+  if (!days.length) buildWorkoutDayBlock(daysWrap, {title: 'Day 1'}, pw);
 
-  overlay.querySelector('#add-day-btn').addEventListener('click', () => buildWorkoutDayBlock(daysWrap, {title: `Day ${daysWrap.children.length + 1}`}));
+  overlay.querySelector('#add-day-btn').addEventListener('click', () => buildWorkoutDayBlock(daysWrap, {title: `Day ${daysWrap.children.length + 1}`}, pw));
   overlay.querySelector('#tpl-cancel-btn').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#tpl-save-btn').addEventListener('click', async () => {
     const name = overlay.querySelector('#tpl-name').value.trim();
