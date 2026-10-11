@@ -677,6 +677,8 @@ async function renderClientWorkoutTab(content, clientId){
 
   const exWrap = el(`<div class="stack"></div>`);
   content.appendChild(exWrap);
+  const cardioSectionWrap = el(`<div></div>`);
+  content.appendChild(cardioSectionWrap);
   const saveBtn = el(`<button class="btn btn-block" id="save-workout-btn">Save</button>`);
   content.appendChild(saveBtn);
   const progressToggleBtn = el(`<button type="button" class="btn btn-outline btn-block" id="toggle-progress-btn" style="margin-top:16px;">Show Progress</button>`);
@@ -725,7 +727,8 @@ async function renderClientWorkoutTab(content, clientId){
   function renderPlanSections(day){
     planSectionsWrap.innerHTML = '';
     if (day.warmup && day.warmup.items && day.warmup.items.length) planSectionsWrap.appendChild(buildWarmupSection(day.warmup));
-    if (day.cardio && day.cardio.length) planSectionsWrap.appendChild(buildCardioSection(day.cardio));
+    cardioSectionWrap.innerHTML = '';
+    if (day.cardio && day.cardio.length) cardioSectionWrap.appendChild(buildCardioSection(day.cardio));
   }
 
   function renderDayTabs(wk){
@@ -817,10 +820,14 @@ async function renderClientDietTab(content, clientId){
   try{ res = await api('getMyDietPlan', {clientId}); }
   catch(err){ return renderConnectionError(() => renderClientDietTab(content, clientId)); }
   content.innerHTML = '';
-  if (!res.ok || !res.days.length){
+  if (!res.ok || (!res.days.length && !res.notes)){
     content.appendChild(el(`<div class="card" style="text-align:center;"><p>Your coach hasn't set up your diet plan yet.</p></div>`));
     return;
   }
+  if (res.notes){
+    content.appendChild(el(`<div class="card" style="margin-bottom:12px;"><p style="white-space:pre-wrap;margin:0;">${res.notes}</p></div>`));
+  }
+  if (!res.days.length) return;
   const dayTabs = el(`<div class="week-tabs"></div>`);
   const dayContent = el(`<div></div>`);
   res.days.forEach((day, i) => {
@@ -1217,6 +1224,8 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
 
   const exWrap = el(`<div class="stack"></div>`);
   content.appendChild(exWrap);
+  const cardioSectionWrap = el(`<div></div>`);
+  content.appendChild(cardioSectionWrap);
   const saveBtn = el(`<button class="btn btn-block" id="save-log-btn">Save</button>`);
   content.appendChild(saveBtn);
   const progressToggleBtn = el(`<button type="button" class="btn btn-outline btn-block" id="toggle-progress-btn" style="margin-top:16px;">Show Progress</button>`);
@@ -1267,7 +1276,8 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
   function renderPlanSections(day){
     planSectionsWrap.innerHTML = '';
     if (day.warmup.items.length) planSectionsWrap.appendChild(buildWarmupSection(day.warmup));
-    if (day.cardio.length) planSectionsWrap.appendChild(buildCardioSection(day.cardio));
+    cardioSectionWrap.innerHTML = '';
+    if (day.cardio.length) cardioSectionWrap.appendChild(buildCardioSection(day.cardio));
   }
 
   function renderDayTabs(wk){
@@ -1461,11 +1471,11 @@ function buildWorkoutDayBlock(daysWrap, day, pw){
           <button type="button" class="btn btn-outline btn-sm manage-warmup-tpl-btn">Manage Warm-up Templates</button>
         </div>
       </div>
+      <div class="stack-sm" style="margin-top:16px;"><h3>Exercises</h3><div class="ex-rows stack-sm"></div><button type="button" class="btn btn-outline btn-sm add-ex-row">+ Add Exercise</button></div>
       <div class="stack-sm" style="margin-top:16px;">
         <h3 style="margin:0;">Cardio</h3><div class="cardio-rows stack-sm"></div>
         <button type="button" class="btn btn-outline btn-sm add-cardio-row">+ Add Cardio</button>
       </div>
-      <div class="stack-sm" style="margin-top:16px;"><h3>Exercises</h3><div class="ex-rows stack-sm"></div><button type="button" class="btn btn-outline btn-sm add-ex-row">+ Add Exercise</button></div>
     </div>
   `);
   const warmupRows = block.querySelector('.warmup-rows');
@@ -1787,7 +1797,11 @@ async function renderDietAdminTab(content, pw, clientId){
   content.innerHTML = '';
 
   content.appendChild(el(`<button class="btn btn-outline btn-sm" id="edit-diet-btn" style="margin-bottom:12px;">Edit Diet Plan</button>`));
-  content.querySelector('#edit-diet-btn').addEventListener('click', () => openDietPlanEditor(pw, clientId, res.days, () => renderDietAdminTab(content, pw, clientId)));
+  content.querySelector('#edit-diet-btn').addEventListener('click', () => openDietPlanEditor(pw, clientId, res.days, res.notes, () => renderDietAdminTab(content, pw, clientId)));
+
+  if (res.notes){
+    content.appendChild(el(`<div class="card" style="margin-bottom:12px;"><p class="field-hint" style="margin:0 0 4px;">General notes</p><p style="white-space:pre-wrap;margin:0;">${res.notes}</p></div>`));
+  }
 
   if (!res.days.length){
     content.appendChild(el(`<div class="card"><p>No diet plan for this client yet.</p></div>`));
@@ -1801,9 +1815,13 @@ async function renderDietAdminTab(content, pw, clientId){
   });
 }
 
-function openDietPlanEditor(pw, clientId, days, onDone){
+function openDietPlanEditor(pw, clientId, days, notes, onDone){
   const overlay = openModal(`
     <h3>Edit Diet Plan</h3>
+    <div class="stack-sm" style="margin-bottom:14px;border-bottom:1px solid var(--border);padding-bottom:14px;">
+      <div class="field-label">General notes (optional) — shown to the client above the days, not tied to any one day</div>
+      <textarea id="diet-notes"></textarea>
+    </div>
     <div id="days-wrap" class="stack"></div>
     <button type="button" class="btn btn-outline btn-sm" id="add-day-btn" style="margin-top:10px;">+ Add Day</button>
     <div class="row" style="margin-top:16px;">
@@ -1812,6 +1830,7 @@ function openDietPlanEditor(pw, clientId, days, onDone){
     </div>
   `, true);
   const daysWrap = overlay.querySelector('#days-wrap');
+  overlay.querySelector('#diet-notes').value = notes || '';
 
   function addMealRow(mealsWrap, m){
     const row = el(`
@@ -1863,7 +1882,8 @@ function openDietPlanEditor(pw, clientId, days, onDone){
       });
       newDays.push({ title, meals });
     });
-    const r = await api('saveDietPlan', {password: pw, clientId, days: newDays});
+    const newNotes = overlay.querySelector('#diet-notes').value;
+    const r = await api('saveDietPlan', {password: pw, clientId, days: newDays, notes: newNotes});
     if (r.ok){ overlay.remove(); onDone(); }
   });
 }
