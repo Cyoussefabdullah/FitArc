@@ -307,11 +307,22 @@ async function removeMonth(pw, clientId) {
 
 // ---------- Workout plan (structure) + logs (weekly numbers) ----------
 
+// target rep range (repsMin/repsMax) is optional coach guidance shown
+// read-only to the client next to Rest Time -- e.g. "8-12 reps" -- not the
+// same as the per-set reps the client actually logs each week.
+function sanitizeRepBound(v) {
+  if (v === '' || v == null) return null;
+  const n = parseInt(v, 10);
+  return (Number.isFinite(n) && n > 0) ? Math.min(100, n) : null;
+}
+
 function sanitizeExercises(list) {
   if (!Array.isArray(list)) return [];
   return list.slice(0, 40).map(e => ({
     name: String((e && e.name) || '').slice(0, 120),
     setsCount: Math.max(1, Math.min(12, parseInt((e && e.setsCount) || 3, 10) || 3)),
+    repsMin: sanitizeRepBound(e && e.repsMin),
+    repsMax: sanitizeRepBound(e && e.repsMax),
     restTime: String((e && e.restTime) || '').slice(0, 60),
     notes: String((e && e.notes) || '').slice(0, 500),
     videoLink: String((e && e.videoLink) || '').slice(0, 500),
