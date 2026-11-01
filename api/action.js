@@ -350,6 +350,25 @@ function sanitizeWarmup(raw) {
   };
 }
 
+function sanitizeStretchItems(list) {
+  if (!Array.isArray(list)) return [];
+  return list.slice(0, 20).map(s => ({
+    name: String((s && s.name) || '').slice(0, 120),
+    videoLink: String((s && s.videoLink) || '').slice(0, 500),
+  })).filter(s => s.name);
+}
+
+// stretches is a fixed list the coach fills in once (not logged/edited weekly
+// by the client), shown to the client between Exercises and Cardio -- same
+// { items: [...] } shape and convention as warmup, just a lighter row (name +
+// optional video link only, no sets/rep-time) and no overall notes field.
+function sanitizeStretches(raw) {
+  const obj = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : { items: Array.isArray(raw) ? raw : [] };
+  return {
+    items: sanitizeStretchItems(obj.items),
+  };
+}
+
 // cardio is a fixed list the coach fills in once (not logged/edited weekly by
 // the client, same convention as warmup) -- each row is {name, time, hrZone}:
 // name is the cardio type typed in freely by the coach (e.g. "Running",
@@ -373,6 +392,7 @@ function sanitizeWorkoutDay(d) {
     title: String((d && d.title) || '').slice(0, 60),
     exercises: sanitizeExercises(d && d.exercises),
     warmup: sanitizeWarmup(d && d.warmup),
+    stretches: sanitizeStretches(d && d.stretches),
     cardio: sanitizeCardio(d && d.cardio),
   };
 }
@@ -583,6 +603,52 @@ async function deleteWarmupTemplate(pw, templateId) {
   return { ok: true };
 }
 
+// ---------- Stretch templates (reusable stretch tables, saved independently
+// of any client or day, loaded into any training day's Stretches section --
+// same convention as warm-up templates above) ----------
+
+async function listStretchTemplates(pw) {
+  if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
+  const rows = await sql`SELECT id, name, stretches, created_at AS "createdAt" FROM stretch_templates ORDER BY created_at DESC`;
+  return {
+    ok: true,
+    templates: rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      stretches: sanitizeStretches(r.stretches),
+      createdAt: r.createdAt,
+    })),
+  };
+}
+
+async function saveStretchTemplate(pw, templateId, name, stretches) {
+  if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
+  const cleanName = String(name || '').slice(0, 120).trim();
+  if (!cleanName) return { ok: false, error: 'name_required' };
+  const cleanStretches = sanitizeStretches(stretches);
+  if (templateId) {
+    await sql`
+      UPDATE stretch_templates
+      SET name = ${cleanName}, stretches = ${JSON.stringify(cleanStretches)}::jsonb
+      WHERE id = ${templateId}
+    `;
+    return { ok: true, id: templateId, name: cleanName, stretches: cleanStretches };
+  }
+  const rows = await sql`
+    INSERT INTO stretch_templates (name, stretches)
+    VALUES (${cleanName}, ${JSON.stringify(cleanStretches)}::jsonb)
+    RETURNING id
+  `;
+  return { ok: true, id: rows[0].id, name: cleanName, stretches: cleanStretches };
+}
+
+async function deleteStretchTemplate(pw, templateId) {
+  if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
+  if (!templateId) return { ok: false, error: 'invalid_id' };
+  await sql`DELETE FROM stretch_templates WHERE id = ${templateId}`;
+  return { ok: true };
+}
+
 // Returns a full week: every day in that week's plan, each with its own
 // exercises/warmup/cardio PLUS that day's logged data ("data", parallel to
 // that day's exercises) -- one round trip gives the whole week, since a
@@ -596,6 +662,7 @@ async function getWorkoutWeek(clientId, weekNumber) {
     title: day.title,
     exercises: day.exercises,
     warmup: day.warmup,
+    stretches: day.stretches,
     cardio: day.cardio,
     data: sanitizeLogData(logsByDay[i] || [], day.exercises),
   }));
@@ -799,6 +866,15 @@ module.exports = async (req, res) => {
         break;
       case 'deleteWarmupTemplate':
         out = await deleteWarmupTemplate(body.password, body.templateId);
+        break;
+      case 'listStretchTemplates':
+        out = await listStretchTemplates(body.password);
+        break;
+      case 'saveStretchTemplate':
+        out = await saveStretchTemplate(body.password, body.templateId, body.name, body.stretches);
+        break;
+      case 'deleteStretchTemplate':
+        out = await deleteStretchTemplate(body.password, body.templateId);
         break;
       case 'getWorkoutWeekAdmin':
         out = await getWorkoutWeekAdmin(body.password, body.clientId, body.weekNumber);
