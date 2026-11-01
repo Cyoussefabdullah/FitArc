@@ -599,6 +599,37 @@ function buildWarmupSection(warmup){
   return wrap;
 }
 
+// ---------------- stretch section: collapsible table (stretch / video), coach-authored only ----------------
+function buildStretchSection(stretches){
+  const list = (stretches && stretches.items) || [];
+  const wrap = el(`<div class="stack" style="margin-bottom:16px;"></div>`);
+  const toggleBtn = el(`<button type="button" class="btn btn-outline btn-block" id="toggle-stretch-btn">Show Stretches (${list.length})</button>`);
+  wrap.appendChild(toggleBtn);
+  const tableCard = el(`
+    <div class="card" hidden>
+      <div class="row" style="font-weight:600;color:var(--text-dim);font-size:12px;padding-bottom:6px;">
+        <span style="flex:2;">Stretch</span>
+      </div>
+    </div>
+  `);
+  list.forEach(s => {
+    const videoBtnHtml = s.videoLink
+      ? `<a href="${s.videoLink}" target="_blank" rel="noopener" class="video-link-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>Video</a>`
+      : '';
+    tableCard.appendChild(el(`
+      <div class="row" style="padding:8px 0;border-top:1px solid var(--border);align-items:center;justify-content:space-between;">
+        <span style="flex:2;">${s.name}</span>${videoBtnHtml}
+      </div>
+    `));
+  });
+  wrap.appendChild(tableCard);
+  toggleBtn.addEventListener('click', () => {
+    tableCard.hidden = !tableCard.hidden;
+    toggleBtn.textContent = (tableCard.hidden ? 'Show' : 'Hide') + ` Stretches (${list.length})`;
+  });
+  return wrap;
+}
+
 // ---------------- cardio section: collapsible table (cardio type / time / heart rate zone), coach-authored only ----------------
 // Same convention as the warm-up table above: a fixed list the coach fills in
 // once, shown read-only to the client, not logged/edited weekly. "name" is
@@ -677,6 +708,8 @@ async function renderClientWorkoutTab(content, clientId){
 
   const exWrap = el(`<div class="stack"></div>`);
   content.appendChild(exWrap);
+  const stretchSectionWrap = el(`<div></div>`);
+  content.appendChild(stretchSectionWrap);
   const cardioSectionWrap = el(`<div></div>`);
   content.appendChild(cardioSectionWrap);
   const saveBtn = el(`<button class="btn btn-block" id="save-workout-btn">Save</button>`);
@@ -727,6 +760,8 @@ async function renderClientWorkoutTab(content, clientId){
   function renderPlanSections(day){
     planSectionsWrap.innerHTML = '';
     if (day.warmup && day.warmup.items && day.warmup.items.length) planSectionsWrap.appendChild(buildWarmupSection(day.warmup));
+    stretchSectionWrap.innerHTML = '';
+    if (day.stretches && day.stretches.items && day.stretches.items.length) stretchSectionWrap.appendChild(buildStretchSection(day.stretches));
     cardioSectionWrap.innerHTML = '';
     if (day.cardio && day.cardio.length) cardioSectionWrap.appendChild(buildCardioSection(day.cardio));
   }
@@ -942,10 +977,20 @@ async function renderAdminDashboard(pw){
   wrap.querySelector('#templates-btn').addEventListener('click', () => renderTemplatesLibrary(pw));
 }
 
-function openModal(innerHtml, wide){
+// `protect` guards editors with a lot of typed-in data (workout plan / plan
+// template / diet plan editors) against an accidental stray click on the
+// dark backdrop silently closing the whole editor and discarding everything
+// typed so far. When true, a backdrop click asks for confirmation first
+// instead of closing immediately; the explicit Cancel/Close button inside
+// the editor still closes it with no prompt either way.
+function openModal(innerHtml, wide, protect){
   const overlay = el(`<div class="modal-overlay"><div class="modal-box${wide ? ' modal-box-wide' : ''}"></div></div>`);
   overlay.querySelector('.modal-box').innerHTML = innerHtml;
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  overlay.addEventListener('click', (e) => {
+    if (e.target !== overlay) return;
+    if (protect && !confirm('Close without saving? Any changes you made here will be lost.')) return;
+    overlay.remove();
+  });
   document.body.appendChild(overlay);
   return overlay;
 }
@@ -1224,6 +1269,8 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
 
   const exWrap = el(`<div class="stack"></div>`);
   content.appendChild(exWrap);
+  const stretchSectionWrap = el(`<div></div>`);
+  content.appendChild(stretchSectionWrap);
   const cardioSectionWrap = el(`<div></div>`);
   content.appendChild(cardioSectionWrap);
   const saveBtn = el(`<button class="btn btn-block" id="save-log-btn">Save</button>`);
@@ -1276,6 +1323,8 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
   function renderPlanSections(day){
     planSectionsWrap.innerHTML = '';
     if (day.warmup.items.length) planSectionsWrap.appendChild(buildWarmupSection(day.warmup));
+    stretchSectionWrap.innerHTML = '';
+    if (day.stretches.items.length) stretchSectionWrap.appendChild(buildStretchSection(day.stretches));
     cardioSectionWrap.innerHTML = '';
     if (day.cardio.length) cardioSectionWrap.appendChild(buildCardioSection(day.cardio));
   }
@@ -1427,6 +1476,39 @@ function readWarmupRows(container){
   });
   return out;
 }
+// stretch row: lighter than a warm-up row (name + optional video link only)
+function buildStretchRow(container, s){
+  const row = el(`
+    <div class="stack-sm stretch-row" style="border:1px solid var(--border);border-radius:10px;padding:10px;">
+      <div class="row" style="align-items:center;">
+        <input type="text" class="s-name" placeholder="Stretch name" value="${(s && s.name) || ''}" style="flex:2;">
+        <button type="button" class="icon-btn move-up-row" title="Move up">↑</button>
+        <button type="button" class="icon-btn move-down-row" title="Move down">↓</button>
+        <button type="button" class="icon-btn remove-row">×</button>
+      </div>
+      <input type="text" class="s-video" placeholder="Video link (optional)" value="${(s && s.videoLink) || ''}">
+    </div>
+  `);
+  row.querySelector('.remove-row').addEventListener('click', () => row.remove());
+  row.querySelector('.move-up-row').addEventListener('click', () => {
+    const prev = row.previousElementSibling;
+    if (prev) row.parentNode.insertBefore(row, prev);
+  });
+  row.querySelector('.move-down-row').addEventListener('click', () => {
+    const next = row.nextElementSibling;
+    if (next) row.parentNode.insertBefore(next, row);
+  });
+  container.appendChild(row);
+  return row;
+}
+function readStretchRows(container){
+  const out = [];
+  container.querySelectorAll('.stretch-row').forEach(row => {
+    const name = row.querySelector('.s-name').value;
+    if (name) out.push({ name, videoLink: row.querySelector('.s-video').value });
+  });
+  return out;
+}
 // cardio row: fixed cardio list, coach-authored only (name = cardio type typed in freely, e.g. "Running")
 function buildCardioRow(container, c){
   const row = el(`
@@ -1493,6 +1575,19 @@ function buildWorkoutDayBlock(daysWrap, day, pw){
       </div>
       <div class="stack-sm" style="margin-top:16px;"><h3>Exercises</h3><div class="ex-rows stack-sm"></div><button type="button" class="btn btn-outline btn-sm add-ex-row">+ Add Exercise</button></div>
       <div class="stack-sm" style="margin-top:16px;">
+        <h3 style="margin:0;">Stretches</h3>
+        <div class="row" style="align-items:center;">
+          <select class="stretch-tpl-select" style="flex:2;"><option value="">— Load a saved stretches set —</option></select>
+          <button type="button" class="btn btn-outline btn-sm load-stretch-tpl-btn">Load</button>
+        </div>
+        <div class="stretch-rows stack-sm"></div>
+        <button type="button" class="btn btn-outline btn-sm add-stretch-row">+ Add Stretch</button>
+        <div class="row" style="margin-top:4px;">
+          <button type="button" class="btn btn-outline btn-sm save-stretch-tpl-btn">Save this Stretches as...</button>
+          <button type="button" class="btn btn-outline btn-sm manage-stretch-tpl-btn">Manage Stretch Templates</button>
+        </div>
+      </div>
+      <div class="stack-sm" style="margin-top:16px;">
         <h3 style="margin:0;">Cardio</h3><div class="cardio-rows stack-sm"></div>
         <button type="button" class="btn btn-outline btn-sm add-cardio-row">+ Add Cardio</button>
       </div>
@@ -1501,13 +1596,19 @@ function buildWorkoutDayBlock(daysWrap, day, pw){
   const warmupRows = block.querySelector('.warmup-rows');
   const exRows = block.querySelector('.ex-rows');
   const warmupNotesEl = block.querySelector('.warmup-notes');
+  const stretchRows = block.querySelector('.stretch-rows');
   const cardioRows = block.querySelector('.cardio-rows');
   const warmupTplSelect = block.querySelector('.warmup-tpl-select');
+  const stretchTplSelect = block.querySelector('.stretch-tpl-select');
 
   const warmupItems = (day && day.warmup && day.warmup.items) || [];
   warmupItems.forEach(w => buildWarmupRow(warmupRows, w));
   if (!warmupItems.length) buildWarmupRow(warmupRows);
   warmupNotesEl.value = (day && day.warmup && day.warmup.notes) || '';
+
+  const stretchItems = (day && day.stretches && day.stretches.items) || [];
+  stretchItems.forEach(s => buildStretchRow(stretchRows, s));
+  if (!stretchItems.length) buildStretchRow(stretchRows);
 
   const cardioItems = (day && day.cardio) || [];
   cardioItems.forEach(c => buildCardioRow(cardioRows, c));
@@ -1564,13 +1665,58 @@ function buildWorkoutDayBlock(daysWrap, day, pw){
     openManageWarmupTemplatesModal(pw, refreshAllWarmupTplPickers);
   });
 
+  // stretch templates: a separate, reusable library of stretch lists the
+  // coach can load into THIS day's Stretches section alone -- same pattern
+  // as warm-up templates above (independent of exercises/cardio/warmup, and
+  // of the full day-split "Plan Templates" library).
+  let stretchTplCache = [];
+  function loadStretchTplOptions(){
+    stretchTplSelect.innerHTML = '<option value="">— Load a saved stretches set —</option>';
+    api('listStretchTemplates', {password: pw}).then(r => {
+      if (r.ok){
+        stretchTplCache = r.templates;
+        r.templates.forEach(t => stretchTplSelect.appendChild(el(`<option value="${t.id}">${t.name}</option>`)));
+      }
+    });
+  }
+  loadStretchTplOptions();
+
+  if (!daysWrap._stretchTplRefreshers) daysWrap._stretchTplRefreshers = [];
+  daysWrap._stretchTplRefreshers.push(loadStretchTplOptions);
+  function refreshAllStretchTplPickers(){
+    (daysWrap._stretchTplRefreshers || []).forEach(fn => fn());
+  }
+
+  block.querySelector('.load-stretch-tpl-btn').addEventListener('click', () => {
+    const id = Number(stretchTplSelect.value);
+    const t = stretchTplCache.find(x => x.id === id);
+    if (!t) return;
+    if (!confirm('Loading this stretches set will replace the stretch rows for this day. Continue?')) return;
+    stretchRows.innerHTML = '';
+    const items = (t.stretches && t.stretches.items) || [];
+    items.forEach(s => buildStretchRow(stretchRows, s));
+    if (!items.length) buildStretchRow(stretchRows);
+  });
+
+  block.querySelector('.save-stretch-tpl-btn').addEventListener('click', () => {
+    openSaveStretchTemplateModal(pw, { items: readStretchRows(stretchRows) }, refreshAllStretchTplPickers);
+  });
+
+  block.querySelector('.manage-stretch-tpl-btn').addEventListener('click', () => {
+    openManageStretchTemplatesModal(pw, refreshAllStretchTplPickers);
+  });
+
   block.querySelector('.add-warmup-row').addEventListener('click', () => buildWarmupRow(warmupRows));
+  block.querySelector('.add-stretch-row').addEventListener('click', () => buildStretchRow(stretchRows));
   block.querySelector('.add-cardio-row').addEventListener('click', () => buildCardioRow(cardioRows));
   block.querySelector('.add-ex-row').addEventListener('click', () => buildExRow(exRows));
   block.querySelector('.remove-day').addEventListener('click', () => {
     block.remove();
     if (daysWrap._warmupTplRefreshers) {
       daysWrap._warmupTplRefreshers = daysWrap._warmupTplRefreshers.filter(fn => fn !== loadWarmupTplOptions);
+    }
+    if (daysWrap._stretchTplRefreshers) {
+      daysWrap._stretchTplRefreshers = daysWrap._stretchTplRefreshers.filter(fn => fn !== loadStretchTplOptions);
     }
   });
   daysWrap.appendChild(block);
@@ -1633,6 +1779,62 @@ function openManageWarmupTemplatesModal(pw, onDone){
   overlay.querySelector('#wtpl-close-btn').addEventListener('click', () => { overlay.remove(); if (onDone) onDone(); });
 }
 
+function openSaveStretchTemplateModal(pw, stretches, onDone){
+  const overlay = openModal(`
+    <h3>Save Stretches as Template</h3>
+    <div class="stack-sm">
+      <div class="field-label">Stretches template name</div>
+      <input type="text" id="stpl-name" placeholder="e.g. Lower Body Stretches">
+      <div class="row" style="margin-top:10px;">
+        <button class="btn" id="stpl-save-btn">Save</button>
+        <button class="btn btn-outline" id="stpl-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  `);
+  overlay.querySelector('#stpl-cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#stpl-save-btn').addEventListener('click', async () => {
+    const name = overlay.querySelector('#stpl-name').value.trim();
+    if (!name) return;
+    const r = await api('saveStretchTemplate', {password: pw, name, stretches});
+    if (r.ok){ overlay.remove(); if (onDone) onDone(); }
+  });
+}
+
+function openManageStretchTemplatesModal(pw, onDone){
+  const overlay = openModal(`
+    <h3>Manage Stretch Templates</h3>
+    <div id="stpl-list" class="stack-sm"></div>
+    <div class="row" style="margin-top:14px;"><button class="btn btn-outline" id="stpl-close-btn">Close</button></div>
+  `);
+  const list = overlay.querySelector('#stpl-list');
+  async function reload(){
+    list.innerHTML = '<div class="field-hint">Loading…</div>';
+    const r = await api('listStretchTemplates', {password: pw});
+    list.innerHTML = '';
+    if (!r.ok || !r.templates.length){
+      list.appendChild(el(`<p class="field-hint">No stretch templates saved yet.</p>`));
+      return;
+    }
+    r.templates.forEach(t => {
+      const row = el(`
+        <div class="row" style="justify-content:space-between;align-items:center;border-top:1px solid var(--border);padding-top:8px;">
+          <span>${t.name} <span class="field-hint">(${(t.stretches.items || []).length} item(s))</span></span>
+          <button type="button" class="btn btn-outline btn-sm delete-stpl-btn" style="color:var(--danger);border-color:var(--danger);">Delete</button>
+        </div>
+      `);
+      row.querySelector('.delete-stpl-btn').addEventListener('click', async () => {
+        if (!confirm(`Delete stretches template "${t.name}"?`)) return;
+        await api('deleteStretchTemplate', {password: pw, templateId: t.id});
+        reload();
+        if (onDone) onDone();
+      });
+      list.appendChild(row);
+    });
+  }
+  reload();
+  overlay.querySelector('#stpl-close-btn').addEventListener('click', () => { overlay.remove(); if (onDone) onDone(); });
+}
+
 function readWorkoutDays(daysWrap){
   const out = [];
   daysWrap.querySelectorAll('.workout-day-block').forEach(block => {
@@ -1642,6 +1844,7 @@ function readWorkoutDays(daysWrap){
       title,
       exercises: readExRows(block.querySelector('.ex-rows')),
       warmup: { items: readWarmupRows(block.querySelector('.warmup-rows')), notes: block.querySelector('.warmup-notes').value },
+      stretches: { items: readStretchRows(block.querySelector('.stretch-rows')) },
       cardio: readCardioRows(block.querySelector('.cardio-rows')),
     });
   });
@@ -1665,7 +1868,7 @@ function openWorkoutPlanEditor(pw, clientId, weekNumber, days, onDone){
       <button class="btn btn-outline" id="save-as-template-btn">Save as Template</button>
       <button class="btn btn-outline" id="plan-cancel">Cancel</button>
     </div>
-  `, true);
+  `, true, true);
   const daysWrap = overlay.querySelector('#days-wrap');
 
   (days && days.length ? days : []).forEach(d => buildWorkoutDayBlock(daysWrap, d, pw));
@@ -1790,7 +1993,7 @@ function openTemplateEditor(pw, template, onDone){
       <button class="btn" id="tpl-save-btn">Save Template</button>
       <button class="btn btn-outline" id="tpl-cancel-btn">Cancel</button>
     </div>
-  `, true);
+  `, true, true);
   const daysWrap = overlay.querySelector('#days-wrap');
   const days = (template && template.days) || [];
   (days.length ? days : []).forEach(d => buildWorkoutDayBlock(daysWrap, d, pw));
@@ -1848,7 +2051,7 @@ function openDietPlanEditor(pw, clientId, days, notes, onDone){
       <button class="btn" id="diet-save">Save</button>
       <button class="btn btn-outline" id="diet-cancel">Cancel</button>
     </div>
-  `, true);
+  `, true, true);
   const daysWrap = overlay.querySelector('#days-wrap');
   overlay.querySelector('#diet-notes').value = notes || '';
 
