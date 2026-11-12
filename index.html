@@ -59,6 +59,13 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--primary)
 .detail-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:12px;margin:10px 0;}
 .detail-item .num{font-family:var(--font-en);font-size:22px;font-weight:600;}
 .field-hint{font-size:12px;color:var(--text-dim);}
+/* Shared style for every "notes" field's actual text — both the coach's own
+   notes (exercise notes, warm-up notes, diet plan notes) and the client's
+   own notes (per-exercise log notes, weekly check-in notes), wherever they
+   are displayed/read back (not the input boxes themselves) — made to stand
+   out in red and a bit larger than normal body text so neither side misses
+   them while scanning a page. */
+.note-text{color:#F04438;font-size:15px;font-weight:600;line-height:1.5;}
 .scale-row{display:flex;gap:6px;flex-wrap:wrap;}
 .scale-btn{flex:1;min-width:38px;text-align:center;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:9px 4px;cursor:pointer;font-family:var(--font-en);color:var(--text);}
 .scale-btn.sel{background:var(--primary);border-color:var(--primary);color:#fff;}
@@ -111,73 +118,13 @@ function renderConnectionError(retry){
 }
 
 // ---------------- routing ----------------
-// ---------------- device storage helpers (login memory + unsent drafts) ----------------
-const Store = {
-  get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } },
-  set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} },
-  del(k){ try{ localStorage.removeItem(k); }catch(e){} },
-  keys(prefix){ try{ return Object.keys(localStorage).filter(k => k.indexOf(prefix) === 0); }catch(e){ return []; } }
-};
-function getSavedClientId(){
-  let v = Store.get('oc_client_id');
-  if (!v){ try{ v = sessionStorage.getItem('oc_client_id'); if (v) Store.set('oc_client_id', v); }catch(e){} }
-  return v;
-}
-function clearSavedClientId(){ Store.del('oc_client_id'); try{ sessionStorage.removeItem('oc_client_id'); }catch(e){} }
-
-// ---------------- drafts: keep what the client typed until it is really sent ----------------
-const DRAFT_PREFIX = 'fitarc_draft:';
-const Draft = {
-  load(key){ try{ const v = Store.get(DRAFT_PREFIX + key); return v ? JSON.parse(v) : null; }catch(e){ return null; } },
-  save(key, obj){ Store.set(DRAFT_PREFIX + key, JSON.stringify(obj)); },
-  clear(key){ Store.del(DRAFT_PREFIX + key); },
-  clearAllForClient(clientId){ Store.keys(DRAFT_PREFIX).forEach(k => { if (k.indexOf(':' + clientId + ':') !== -1 || k.endsWith(':' + clientId)) Store.del(k); }); }
-};
-// generic form draft: text/number/textarea fields (by id) + hidden scale values (by name). Returns {clear}.
-function attachFormDraft(form, key){
-  const fields = () => Array.from(form.querySelectorAll('input:not([type=hidden]), textarea, select')).filter(f => f.id);
-  const hiddens = () => Array.from(form.querySelectorAll('input[type=hidden][name$="-val"]'));
-  function snapshot(){
-    const o = {f:{}, h:{}};
-    fields().forEach(f => { o.f[f.id] = f.value; });
-    hiddens().forEach(h => { o.h[h.name] = h.value; });
-    return o;
-  }
-  function isEmpty(o){ return !Object.values(o.f).some(v => v !== '') && !Object.values(o.h).some(v => v !== ''); }
-  function persist(){ const o = snapshot(); if (isEmpty(o)) Draft.clear(key); else Draft.save(key, o); }
-  const d = Draft.load(key);
-  let restored = false;
-  if (d){
-    // 1) scale buttons first (clicking Yes/No may show/clear a conditional field)
-    hiddens().forEach(h => {
-      const v = d.h && d.h[h.name];
-      if (!v) return;
-      const scaleName = h.name.replace(/-val$/, '');
-      const btns = form.querySelectorAll('.scale-row[data-scale="' + scaleName + '"] button');
-      if (!btns.length) return;
-      let idx = -1;
-      if (v === 'yes') idx = 0; else if (v === 'no') idx = 1; else idx = Number(v) - 1;
-      if (btns[idx]){ btns[idx].click(); restored = true; }
-    });
-    // 2) then the typed fields
-    fields().forEach(f => { const v = d.f && d.f[f.id]; if (v !== undefined && v !== '' && !f.value){ f.value = v; restored = true; } });
-  }
-  form.addEventListener('input', persist);
-  form.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('.scale-btn')) setTimeout(persist, 0); });
-  if (restored){
-    const note = el(`<p class="field-hint" style="text-align:center;margin:0 0 8px;">✎ رجّعنالك اللي كنت كاتبه قبل كده — لسه ما اتبعتش</p>`);
-    form.insertBefore(note, form.firstChild);
-  }
-  return { clear(){ Draft.clear(key); } };
-}
-
 const params = new URLSearchParams(location.search);
 if (params.get('admin') === '1'){
   const savedPw = sessionStorage.getItem('oc_admin_pw');
   if (savedPw) adminLoginAttempt(savedPw);
   else renderAdminLogin();
 } else {
-  const savedClientId = getSavedClientId();
+  const savedClientId = sessionStorage.getItem('oc_client_id');
   if (savedClientId) renderClientView(savedClientId);
   else renderClientLogin();
 }
@@ -211,7 +158,7 @@ function renderClientLogin(msg){
     btn.disabled = true; btn.textContent = 'Logging in...';
     try{
       const r = await api('clientLogin', {loginId});
-      if (r.ok){ Store.set('oc_client_id', String(r.clientId)); renderClientView(r.clientId); }
+      if (r.ok){ sessionStorage.setItem('oc_client_id', r.clientId); renderClientView(r.clientId); }
       else renderClientLogin('Wrong code, try again');
     } catch(err){ renderConnectionError(() => renderClientLogin()); }
   }
@@ -226,7 +173,7 @@ async function renderClientView(clientId){
   let data;
   try{
     data = await api('getClientPortal', {clientId});
-    if (!data.ok){ clearSavedClientId(); return renderClientLogin(); }
+    if (!data.ok){ sessionStorage.removeItem('oc_client_id'); return renderClientLogin(); }
   } catch(err){
     return renderConnectionError(() => renderClientView(clientId));
   }
@@ -234,12 +181,7 @@ async function renderClientView(clientId){
   renderClientPortal(clientId, data);
 }
 
-function clientLogout(){
-  const unsent = Store.keys(DRAFT_PREFIX).length;
-  if (unsent && !confirm('فيه بيانات كتبتها ولسه ما اتبعتتش. لو خرجت دلوقتي هتتمسح. تخرج برضو؟')) return;
-  Store.keys(DRAFT_PREFIX).forEach(k => Store.del(k));
-  clearSavedClientId(); renderClientLogin();
-}
+function clientLogout(){ sessionStorage.removeItem('oc_client_id'); renderClientLogin(); }
 
 function subscriptionCard(data){
   const dClass = data.daysRemaining <= 5 ? 'pill-danger' : (data.daysRemaining <= 10 ? 'pill-warn' : 'pill-ok');
@@ -402,7 +344,6 @@ function renderAssessmentView(clientId, name, driveLink){
   form.appendChild(el(`<button type="submit" class="btn btn-block">إرسال</button>`));
   wrap.appendChild(form);
   app.appendChild(wrap);
-  const assessDraft = attachFormDraft(form, 'assessment:' + clientId);
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -439,7 +380,7 @@ function renderAssessmentView(clientId, name, driveLink){
         trainedDuration: trainedBefore === 'yes' ? trainedDuration : '',
         stressLevel: Number(stressLevel),
       });
-      if (r.ok){ assessDraft.clear(); renderAssessmentSuccess(clientId, fullName.split(' ')[0] || name); }
+      if (r.ok) renderAssessmentSuccess(clientId, fullName.split(' ')[0] || name);
       else { btn.disabled = false; btn.textContent = 'إرسال'; errBox.style.display = 'block'; }
     } catch(err){ renderConnectionError(() => renderAssessmentView(clientId, name, driveLink)); }
   });
@@ -523,7 +464,6 @@ function renderCheckinForm(content, clientId, driveLink, existing){
   form.appendChild(errBox);
   form.appendChild(el(`<button type="submit" class="btn btn-block">${existing ? 'حفظ التعديلات' : 'إرسال المتابعة'}</button>`));
   content.appendChild(form);
-  const checkinDraft = existing ? { clear(){} } : attachFormDraft(form, 'checkin:' + clientId);
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -547,7 +487,7 @@ function renderCheckinForm(content, clientId, driveLink, existing){
         clientId, weight: Number(weight), sleepHours: Number(sleepHours), energy: Number(energy),
         diet: Number(diet), stressLevel: Number(stressLevel), steps: Number(steps), problems, notes, weekRating: Number(weekRating),
       });
-      if (r.ok || r.error === 'already_submitted' || r.error === 'too_soon'){ checkinDraft.clear(); renderCheckinTab(content, clientId, driveLink); }
+      if (r.ok || r.error === 'already_submitted' || r.error === 'too_soon') renderCheckinTab(content, clientId, driveLink);
       else { btn.disabled = false; btn.textContent = existing ? 'حفظ التعديلات' : 'إرسال المتابعة'; }
     } catch(err){ renderConnectionError(() => renderCheckinForm(content, clientId, driveLink, existing)); }
   });
@@ -656,7 +596,7 @@ function buildWarmupSection(warmup){
     `));
   });
   if (notes){
-    tableCard.appendChild(el(`<p style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);"><strong>Note:</strong> ${notes}</p>`));
+    tableCard.appendChild(el(`<p class="note-text" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);"><strong>Note:</strong> ${notes}</p>`));
   }
   wrap.appendChild(tableCard);
   toggleBtn.addEventListener('click', () => {
@@ -779,8 +719,6 @@ async function renderClientWorkoutTab(content, clientId){
   content.appendChild(stretchSectionWrap);
   const cardioSectionWrap = el(`<div></div>`);
   content.appendChild(cardioSectionWrap);
-  const draftNote = el(`<p class="field-hint" dir="rtl" style="text-align:center;margin:10px 0 6px;" hidden>متنساش تعمل save لما تخلص</p>`);
-  content.appendChild(draftNote);
   const saveBtn = el(`<button class="btn btn-block" id="save-workout-btn">Save</button>`);
   content.appendChild(saveBtn);
   const progressToggleBtn = el(`<button type="button" class="btn btn-outline btn-block" id="toggle-progress-btn" style="margin-top:16px;">Show Progress</button>`);
@@ -859,7 +797,7 @@ async function renderClientWorkoutTab(content, clientId){
           <div class="ex-card-head"><h3 style="margin:0;">${ex.name}</h3><div class="row" style="gap:6px;flex-shrink:0;">${videoBtnHtml}</div></div>
           ${(ex.repsMin || ex.repsMax) ? `<p class="field-hint" style="margin-top:-4px;">${repRangeText(ex)}</p>` : ''}
           ${ex.restTime ? `<p class="field-hint" style="margin-top:-4px;">Rest: ${ex.restTime}</p>` : ''}
-          ${ex.notes ? `<p class="field-hint" style="margin:2px 0 0;">${ex.notes}</p>` : ''}
+          ${ex.notes ? `<p class="note-text" style="margin:2px 0 0;">${ex.notes}</p>` : ''}
           <div class="sets-area"></div>
         </div>
       `);
@@ -882,45 +820,7 @@ async function renderClientWorkoutTab(content, clientId){
       `));
       exWrap.appendChild(card);
     });
-    applyWorkoutDraft();
   }
-
-  // ---- unsent-numbers draft, one per client/week/day ----
-  const draftKey = () => 'workout:' + clientId + ':' + currentWeek + ':' + currentDay;
-  function collectWorkoutData(){
-    const data = [];
-    exWrap.querySelectorAll('.ex-card').forEach(card => {
-      const sets = [];
-      card.querySelectorAll('.set-row').forEach(row => {
-        sets.push({ weight: row.querySelector('.set-weight').value, reps: row.querySelector('.set-reps').value });
-      });
-      const noteEl = card.querySelector('.ex-note');
-      data.push({ sets, note: noteEl ? noteEl.value : '' });
-    });
-    return data;
-  }
-  function applyWorkoutDraft(){
-    draftNote.hidden = true;
-    const d = Draft.load(draftKey());
-    if (!d || !Array.isArray(d.data)) return;
-    const cards = exWrap.querySelectorAll('.ex-card');
-    if (d.data.length !== cards.length){ Draft.clear(draftKey()); return; } // plan changed since -- draft no longer fits
-    cards.forEach((card, i) => {
-      const rows = card.querySelectorAll('.set-row');
-      (d.data[i].sets || []).forEach((st, si) => {
-        if (!rows[si]) return;
-        rows[si].querySelector('.set-weight').value = st.weight || '';
-        rows[si].querySelector('.set-reps').value = st.reps || '';
-      });
-      const noteEl = card.querySelector('.ex-note');
-      if (noteEl) noteEl.value = d.data[i].note || '';
-    });
-    draftNote.hidden = false;
-  }
-  exWrap.addEventListener('input', () => {
-    Draft.save(draftKey(), { data: collectWorkoutData() });
-    draftNote.hidden = false;
-  });
 
   function loadWeek(weekNum){
     const wk = planForWeek(weekNum);
@@ -931,15 +831,21 @@ async function renderClientWorkoutTab(content, clientId){
   loadWeek(1);
 
   saveBtn.addEventListener('click', async () => {
-    const data = collectWorkoutData();
-    const savedKey = draftKey();
+    const data = [];
+    exWrap.querySelectorAll('.ex-card').forEach(card => {
+      const sets = [];
+      card.querySelectorAll('.set-row').forEach(row => {
+        sets.push({ weight: row.querySelector('.set-weight').value, reps: row.querySelector('.set-reps').value });
+      });
+      const noteEl = card.querySelector('.ex-note');
+      data.push({ sets, note: noteEl ? noteEl.value : '' });
+    });
     saveBtn.disabled = true; saveBtn.textContent = 'Saving...';
     try{
       const r = await api('logWorkout', {clientId, weekNumber: currentWeek, dayIndex: currentDay, data});
       if (r.ok){
         if (!all.logsByWeek[currentWeek]) all.logsByWeek[currentWeek] = {};
         all.logsByWeek[currentWeek][currentDay] = r.data;
-        Draft.clear(savedKey); draftNote.hidden = true;
         renderProgress();
         saveBtn.textContent = 'Saved ✓'; setTimeout(() => { saveBtn.textContent = 'Save'; saveBtn.disabled = false; }, 1200);
       }
@@ -961,7 +867,7 @@ async function renderClientDietTab(content, clientId){
     return;
   }
   if (res.notes){
-    content.appendChild(el(`<div class="card" style="margin-bottom:12px;"><p style="white-space:pre-wrap;margin:0;">${res.notes}</p></div>`));
+    content.appendChild(el(`<div class="card" style="margin-bottom:12px;"><p class="note-text" style="white-space:pre-wrap;margin:0;">${res.notes}</p></div>`));
   }
   if (!res.days.length) return;
   const dayTabs = el(`<div class="week-tabs"></div>`);
@@ -1288,7 +1194,7 @@ async function renderAssessmentCheckinTab(content, pw, clientId){
             <div class="detail-item"><div class="field-hint">Week Rating</div><div class="num">${fmtNum(k.weekRating)}/5</div></div>
           </div>
           ${k.problems ? `<p><strong>Issues:</strong> ${k.problems}</p>` : ''}
-          ${k.notes ? `<p><strong>Notes:</strong> ${k.notes}</p>` : ''}
+          ${k.notes ? `<p class="note-text"><strong>Notes:</strong> ${k.notes}</p>` : ''}
         </div>
       `));
     });
@@ -1453,9 +1359,9 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
           <div class="ex-card-head"><h3 style="margin:0;">${ex.name}</h3><div class="row" style="gap:6px;flex-shrink:0;">${videoBtnHtml}</div></div>
           ${(ex.repsMin || ex.repsMax) ? `<p class="field-hint" style="margin-top:-4px;">${repRangeText(ex)}</p>` : ''}
           ${ex.restTime ? `<p class="field-hint" style="margin-top:-4px;">Rest: ${ex.restTime}</p>` : ''}
-          ${ex.notes ? `<p class="field-hint" style="margin:2px 0 0;">${ex.notes}</p>` : ''}
+          ${ex.notes ? `<p class="note-text" style="margin:2px 0 0;">${ex.notes}</p>` : ''}
           <div class="sets-area"></div>
-          ${existingNote ? `<p class="field-hint" style="margin-top:8px;"><strong>Client note:</strong> ${existingNote}</p>` : ''}
+          ${existingNote ? `<p class="note-text" style="margin-top:8px;"><strong>Client note:</strong> ${existingNote}</p>` : ''}
         </div>
       `);
       card.dataset.note = existingNote;
@@ -2124,7 +2030,7 @@ async function renderDietAdminTab(content, pw, clientId){
   content.querySelector('#edit-diet-btn').addEventListener('click', () => openDietPlanEditor(pw, clientId, res.days, res.notes, () => renderDietAdminTab(content, pw, clientId)));
 
   if (res.notes){
-    content.appendChild(el(`<div class="card" style="margin-bottom:12px;"><p class="field-hint" style="margin:0 0 4px;">General notes</p><p style="white-space:pre-wrap;margin:0;">${res.notes}</p></div>`));
+    content.appendChild(el(`<div class="card" style="margin-bottom:12px;"><p class="field-hint" style="margin:0 0 4px;">General notes</p><p class="note-text" style="white-space:pre-wrap;margin:0;">${res.notes}</p></div>`));
   }
 
   if (!res.days.length){
