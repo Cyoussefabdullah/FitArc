@@ -549,7 +549,7 @@ function buildDayProgressTable(dayTitle, exercises, setsPointsByExercise, totalW
               repsHtml += ` <span style="color:${rColor};font-size:11px;">(${dr > 0 ? '+' : ''}${dr})</span>`;
             }
           }
-          cellHtml = `${wt}kg${repsHtml}${deltaHtml}`;
+          cellHtml = `${wt}kg${deltaHtml}${repsHtml}`;
           prevLogged = p;
         }
         row.appendChild(el(`<td style="padding:5px 8px;border-bottom:1px solid var(--border);border-left:1px solid var(--border);white-space:nowrap;">${cellHtml}</td>`));
