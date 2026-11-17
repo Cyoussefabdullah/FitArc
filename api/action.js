@@ -700,6 +700,39 @@ async function saveWorkoutLog(pw, clientId, weekNumber, dayIndex, data) {
   return { ok: true, data: clean };
 }
 
+// Lets the coach edit just one exercise's coach-note for a given week+day
+// directly from the day-to-day logging screen (renderWorkoutAdminTab),
+// without opening the full Edit Plan editor and without touching anything
+// else about that day (sets count, rest time, rep range, warmup/stretches/
+// cardio -- all read back unchanged from the resolved plan and written
+// straight back). Reuses the exact same per-week customization path every
+// other plan edit already goes through (getWorkoutPlanForWeek /
+// saveWorkoutPlanForWeek): for a week beyond Week 1 that was still
+// inheriting Week 1's plan, saving a note here turns it into its own
+// per-week customization the same way editing any other field for that
+// week already would.
+async function saveExerciseNotes(pw, clientId, weekNumber, dayIndex, notes) {
+  if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
+  if (!clientId || !weekNumber || dayIndex == null) return { ok: false, error: 'invalid_input' };
+  const plan = await getWorkoutPlanForWeek(clientId, weekNumber);
+  const day = plan.days[dayIndex];
+  if (!day) return { ok: false, error: 'invalid_day' };
+  const noteList = Array.isArray(notes) ? notes : [];
+  const updatedDays = plan.days.map((d, i) => {
+    if (i !== dayIndex) return d;
+    return {
+      ...d,
+      exercises: d.exercises.map((ex, j) => ({
+        ...ex,
+        notes: noteList[j] != null ? String(noteList[j]).slice(0, 500) : ex.notes,
+      })),
+    };
+  });
+  const r = await saveWorkoutPlanForWeek(pw, clientId, weekNumber, updatedDays);
+  if (!r.ok) return r;
+  return { ok: true, days: r.days, isCustom: r.isCustom };
+}
+
 async function logWorkout(clientId, weekNumber, dayIndex, data) {
   if (!clientId || !weekNumber || dayIndex == null) return { ok: false, error: 'invalid_input' };
   const c = await getClientRow(clientId);
@@ -884,6 +917,9 @@ module.exports = async (req, res) => {
         break;
       case 'saveWorkoutLog':
         out = await saveWorkoutLog(body.password, body.clientId, body.weekNumber, body.dayIndex, body.data);
+        break;
+      case 'saveExerciseNotes':
+        out = await saveExerciseNotes(body.password, body.clientId, body.weekNumber, body.dayIndex, body.notes);
         break;
       case 'logWorkout':
         out = await logWorkout(body.clientId, body.weekNumber, body.dayIndex, body.data);
