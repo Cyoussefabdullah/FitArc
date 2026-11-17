@@ -493,61 +493,117 @@ function renderCheckinForm(content, clientId, driveLink, existing){
   });
 }
 
-// ---------------- progression comparison (week-over-week, consecutive pairs, weight AND reps, set by set) ----------------
-function buildSetComparisonRows(points){
-  // points: [{week, weight, reps}] in week order; weight/reps may be '' or null for an unlogged week.
-  // Compares week 1 -> week 2, week 2 -> week 3, and so on, stopping at the last week
-  // that actually has a logged weight for this set.
+// ---------------- progression comparison: one table per day, exercises/sets as rows, weeks as columns ----------------
+// Coach (verbatim): "المقارنة صعبة بتاعت ال progrerss ممكن تتعمل ب شكل افضل
+// مثلا في كل يوم يبقى فيه جدول... و في كل يوم يبقا فيه التمارين بتاعت اليوم و
+// المجموعات والعدات و الاوزان و يبان بقا improved - decreased ... او بين
+// قوسين افضل زي م هي موجوده ب الالوان" -- picked, via AskUserQuestion: keep
+// the existing colored numeric delta in parentheses (not a text badge), just
+// laid out as one table per day (exercises/sets as rows, weeks as columns)
+// instead of the old stack of per-set pairwise rows, which took a lot of
+// scrolling to compare more than two weeks at a glance.
+//
+// Replaces the old buildSetComparisonRows()/buildExerciseProgressCard() pair
+// (same week-matching/number-parsing rules, just re-laid-out) -- used by both
+// the coach's and the client's own Progress view, so both sides get the
+// easier-to-read table.
+function buildDayProgressTable(dayTitle, exercises, setsPointsByExercise, totalWeeks){
   const isLogged = (p) => p && p.weight != null && p.weight !== '' && !isNaN(Number(p.weight));
-  const loggedIdx = points.map((p, i) => isLogged(p) ? i : -1).filter(i => i >= 0);
-  if (loggedIdx.length < 2){
-    return el(`<p class="field-hint" style="margin:0 0 10px;font-size:13px;">Not enough data yet (need at least 2 weeks).</p>`);
-  }
-  const lastLogged = loggedIdx[loggedIdx.length - 1];
-  const rowsWrap = el(`<div class="stack-sm" style="margin-bottom:10px;"></div>`);
   const hasReps = (p) => p && p.reps != null && p.reps !== '' && !isNaN(Number(p.reps));
-  for (let i = 0; i < lastLogged; i++){
-    const p1 = points[i], p2 = points[i + 1];
-    const w1 = isLogged(p1) ? Number(p1.weight) : null;
-    const w2 = isLogged(p2) ? Number(p2.weight) : null;
-    let row;
-    if (w1 != null && w2 != null){
-      const dw = Math.round((w2 - w1) * 100) / 100;
-      const wColor = dw >= 0 ? 'var(--success)' : 'var(--danger)';
-      let repsPart = '';
-      if (hasReps(p1) && hasReps(p2)){
-        const r1 = Number(p1.reps), r2 = Number(p2.reps);
-        const dr = r2 - r1;
-        const rColor = dr >= 0 ? 'var(--success)' : 'var(--danger)';
-        repsPart = ` <span class="field-hint">·</span> ${r1}→${r2} reps <span style="color:${rColor};">(${dr > 0 ? '+' : ''}${dr})</span>`;
-      }
-      row = el(`
-        <div class="row" style="justify-content:space-between;padding:6px 0;border-top:1px solid var(--border);flex-wrap:wrap;">
-          <span class="field-hint">Week ${p1.week} → Week ${p2.week}</span>
-          <span>${w1}→${w2} kg <span style="color:${wColor};">(${dw > 0 ? '+' : ''}${dw})</span>${repsPart}</span>
-        </div>
-      `);
-    } else {
-      row = el(`
-        <div class="row" style="justify-content:space-between;padding:6px 0;border-top:1px solid var(--border);">
-          <span class="field-hint">Week ${p1.week} → Week ${p2.week}</span>
-          <span class="field-hint">No data</span>
-        </div>
-      `);
-    }
-    rowsWrap.appendChild(row);
+  const wrap = el(`<div class="card" style="margin-bottom:16px;overflow-x:auto;"></div>`);
+  wrap.appendChild(el(`<h3 style="margin:0 0 10px;">${dayTitle}</h3>`));
+  const minWidth = Math.max(380, 130 + totalWeeks * 92);
+  const table = el(`<table style="width:100%;border-collapse:collapse;font-size:13px;min-width:${minWidth}px;"><thead><tr></tr></thead><tbody></tbody></table>`);
+  const headRow = table.querySelector('thead tr');
+  headRow.appendChild(el(`<th style="text-align:left;padding:4px 8px 8px;border-bottom:1px solid var(--border);color:var(--text-dim);font-size:11px;font-weight:600;">Exercise</th>`));
+  for (let w = 1; w <= totalWeeks; w++){
+    headRow.appendChild(el(`<th style="text-align:left;padding:4px 8px 8px;border-bottom:1px solid var(--border);border-left:1px solid var(--border);color:var(--text-dim);font-size:11px;font-weight:600;white-space:nowrap;">Week ${w}</th>`));
   }
-  return rowsWrap;
-}
+  const tbody = table.querySelector('tbody');
+  let anyRows = false;
+  exercises.forEach((ex, exIdx) => {
+    const setsPoints = setsPointsByExercise[exIdx];
+    if (!setsPoints || !setsPoints.length) return;
+    anyRows = true;
+    tbody.appendChild(el(`<tr><td colspan="${totalWeeks + 1}" style="padding:10px 8px 2px;font-weight:700;">${ex.name}</td></tr>`));
+    setsPoints.forEach((points, s) => {
+      const row = el(`<tr><td style="padding:5px 8px;color:var(--text-dim);border-bottom:1px solid var(--border);white-space:nowrap;font-size:12px;">Set ${s + 1}</td></tr>`);
+      let prevLogged = null;
+      for (let w = 1; w <= totalWeeks; w++){
+        const p = points.find(pt => pt.week === w) || null;
+        let cellHtml = '<span class="field-hint">—</span>';
+        if (isLogged(p)){
+          const wt = Number(p.weight);
+          let deltaHtml = '';
+          if (prevLogged){
+            const dw = Math.round((wt - Number(prevLogged.weight)) * 100) / 100;
+            const wColor = dw >= 0 ? 'var(--success)' : 'var(--danger)';
+            deltaHtml = ` <span style="color:${wColor};font-size:11px;">(${dw > 0 ? '+' : ''}${dw})</span>`;
+          }
+          let repsHtml = '';
+          if (hasReps(p)){
+            repsHtml = ` <span class="field-hint">×</span>${p.reps}`;
+            if (prevLogged && hasReps(prevLogged)){
+              const dr = Number(p.reps) - Number(prevLogged.reps);
+              const rColor = dr >= 0 ? 'var(--success)' : 'var(--danger)';
+              repsHtml += ` <span style="color:${rColor};font-size:11px;">(${dr > 0 ? '+' : ''}${dr})</span>`;
+            }
+          }
+          cellHtml = `${wt}kg${repsHtml}${deltaHtml}`;
+          prevLogged = p;
+        }
+        row.appendChild(el(`<td style="padding:5px 8px;border-bottom:1px solid var(--border);border-left:1px solid var(--border);white-space:nowrap;">${cellHtml}</td>`));
+      }
+      tbody.appendChild(row);
+    });
 
-function buildExerciseProgressCard(ex, setsPoints){
-  // setsPoints: array (one per set) of points arrays, each [{week, weight, reps}, ...]
-  const card = el(`<div class="card" style="margin-bottom:12px;"><h3 style="margin:0 0 8px;">${ex.name}</h3></div>`);
-  setsPoints.forEach((points, s) => {
-    card.appendChild(el(`<div class="field-hint" style="margin:${s === 0 ? '0' : '10px'} 0 4px;font-weight:600;">Set ${s + 1}</div>`));
-    card.appendChild(buildSetComparisonRows(points));
+    // --- Volume row: total (weight × reps) summed across all sets of this
+    // exercise, per week -- a single number that catches cases per-set deltas
+    // can hide, e.g. heavier weight but fewer reps (or vice versa).
+    const volumeByWeek = {};
+    for (let w = 1; w <= totalWeeks; w++){
+      let total = 0, any = false;
+      setsPoints.forEach(points => {
+        const p = points.find(pt => pt.week === w) || null;
+        if (isLogged(p) && hasReps(p)){
+          total += Number(p.weight) * Number(p.reps);
+          any = true;
+        }
+      });
+      if (any) volumeByWeek[w] = Math.round(total * 100) / 100;
+    }
+    if (Object.keys(volumeByWeek).length){
+      const volRow = el(`<tr style="background:var(--surface-2);"><td style="padding:5px 8px;color:var(--text-dim);border-bottom:1px solid var(--border);white-space:nowrap;font-size:12px;font-weight:700;">Volume</td></tr>`);
+      let prevVol = null;
+      for (let w = 1; w <= totalWeeks; w++){
+        let cellHtml = '<span class="field-hint">—</span>';
+        if (volumeByWeek[w] != null){
+          const v = volumeByWeek[w];
+          let deltaHtml = '';
+          if (prevVol != null){
+            const dv = Math.round((v - prevVol) * 100) / 100;
+            // Volume uses an Improved/Declined arrow instead of the numeric
+            // delta used elsewhere in this table -- the coach asked for a
+            // quick glance indicator here specifically, not another number.
+            const arrow = dv > 0 ? '▲' : (dv < 0 ? '▼' : '‒');
+            const vColor = dv > 0 ? 'var(--success)' : (dv < 0 ? 'var(--danger)' : 'var(--text-dim)');
+            const label = dv > 0 ? 'Improved' : (dv < 0 ? 'Declined' : 'No change');
+            deltaHtml = ` <span style="color:${vColor};font-size:13px;font-weight:700;" title="${label}">${arrow}</span>`;
+          }
+          cellHtml = `<strong>${v}</strong>${deltaHtml}`;
+          prevVol = v;
+        }
+        volRow.appendChild(el(`<td style="padding:5px 8px;border-bottom:1px solid var(--border);border-left:1px solid var(--border);white-space:nowrap;">${cellHtml}</td>`));
+      }
+      tbody.appendChild(volRow);
+    }
   });
-  return card;
+  if (!anyRows){
+    wrap.appendChild(el(`<p class="field-hint">Not enough data yet.</p>`));
+    return wrap;
+  }
+  wrap.appendChild(table);
+  return wrap;
 }
 
 // builds one or two "Video" buttons for an exercise row — a second link is for
@@ -734,8 +790,7 @@ async function renderClientWorkoutTab(content, clientId){
     progressWrap.innerHTML = '';
     (all.days || []).forEach((baseDay) => {
       if (!baseDay.exercises.length) return;
-      progressWrap.appendChild(el(`<h3 style="margin:14px 0 4px;">${baseDay.title}</h3>`));
-      baseDay.exercises.forEach((ex) => {
+      const setsPointsByExercise = baseDay.exercises.map((ex) => {
         const setsPoints = [];
         for (let s = 0; s < ex.setsCount; s++){
           const points = [];
@@ -754,8 +809,9 @@ async function renderClientWorkoutTab(content, clientId){
           }
           setsPoints.push(points);
         }
-        progressWrap.appendChild(buildExerciseProgressCard(ex, setsPoints));
+        return setsPoints;
       });
+      progressWrap.appendChild(buildDayProgressTable(baseDay.title, baseDay.exercises, setsPointsByExercise, all.totalWeeks));
     });
   }
   renderProgress();
@@ -1294,8 +1350,7 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
     progressWrap.innerHTML = '';
     (all.days || []).forEach((baseDay) => {
       if (!baseDay.exercises.length) return;
-      progressWrap.appendChild(el(`<h3 style="margin:14px 0 4px;">${baseDay.title}</h3>`));
-      baseDay.exercises.forEach((ex) => {
+      const setsPointsByExercise = baseDay.exercises.map((ex) => {
         const setsPoints = [];
         for (let s = 0; s < ex.setsCount; s++){
           const points = [];
@@ -1316,8 +1371,9 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
           }
           setsPoints.push(points);
         }
-        progressWrap.appendChild(buildExerciseProgressCard(ex, setsPoints));
+        return setsPoints;
       });
+      progressWrap.appendChild(buildDayProgressTable(baseDay.title, baseDay.exercises, setsPointsByExercise, all.totalWeeks));
     });
     progressLoaded = true;
   }
@@ -1359,12 +1415,22 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
           <div class="ex-card-head"><h3 style="margin:0;">${ex.name}</h3><div class="row" style="gap:6px;flex-shrink:0;">${videoBtnHtml}</div></div>
           ${(ex.repsMin || ex.repsMax) ? `<p class="field-hint" style="margin-top:-4px;">${repRangeText(ex)}</p>` : ''}
           ${ex.restTime ? `<p class="field-hint" style="margin-top:-4px;">Rest: ${ex.restTime}</p>` : ''}
-          ${ex.notes ? `<p class="note-text" style="margin:2px 0 0;">${ex.notes}</p>` : ''}
+          <p class="field-hint" style="margin:6px 0 2px;">Note for the client (optional)</p>
+          <textarea class="ex-coach-notes" rows="2" style="min-height:38px;" placeholder="e.g. Go slow on the eccentric"></textarea>
           <div class="sets-area"></div>
           ${existingNote ? `<p class="note-text" style="margin-top:8px;"><strong>Client note:</strong> ${existingNote}</p>` : ''}
         </div>
       `);
       card.dataset.note = existingNote;
+      // the coach's own note on this exercise -- set as a JS property rather
+      // than interpolated into the template above, so the textarea never has
+      // to deal with quote/tag-escaping inside a template string. Pressing
+      // the normal Save button below saves this together with the sets --
+      // no need to open the full Edit Plan editor just to jot a note down
+      // (revision: inline exercise notes).
+      const coachNotesEl = card.querySelector('.ex-coach-notes');
+      coachNotesEl.value = ex.notes || '';
+      card.dataset.origCoachNote = ex.notes || '';
       const setsArea = card.querySelector('.sets-area');
       sets.forEach((s, si) => {
         setsArea.appendChild(el(`
@@ -1393,18 +1459,40 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
 
   saveBtn.addEventListener('click', async () => {
     const data = [];
+    const coachNotes = [];
+    let notesChanged = false;
     exWrap.querySelectorAll('.ex-card').forEach(card => {
       const sets = [];
       card.querySelectorAll('.set-row').forEach(row => {
         sets.push({ weight: row.querySelector('.set-weight').value, reps: row.querySelector('.set-reps').value });
       });
       data.push({ sets, note: card.dataset.note || '' });
+      const noteVal = card.querySelector('.ex-coach-notes').value;
+      coachNotes.push(noteVal);
+      if (noteVal !== (card.dataset.origCoachNote || '')) notesChanged = true;
     });
     saveBtn.disabled = true; saveBtn.textContent = 'Saving...';
-    const r = await api('saveWorkoutLog', {password: pw, clientId, weekNumber: currentWeek, dayIndex: currentDay, data});
-    if (r.ok){
+    // Always saves the sets/reps log. Only also touches the plan's exercise
+    // notes -- and only then creates a per-week customization for a week
+    // that was still inheriting Week 1's plan -- when a note actually
+    // changed, so pressing Save to log numbers (no note edited) never
+    // silently turns an inherited week into a customized one.
+    const calls = [ api('saveWorkoutLog', {password: pw, clientId, weekNumber: currentWeek, dayIndex: currentDay, data}) ];
+    if (notesChanged){
+      calls.push(api('saveExerciseNotes', {password: pw, clientId, weekNumber: currentWeek, dayIndex: currentDay, notes: coachNotes}));
+    }
+    const [logRes, notesRes] = await Promise.all(calls);
+    if (logRes.ok && (!notesRes || notesRes.ok)){
       const wk = weekCache[currentWeek];
-      if (wk && wk.days[currentDay]) wk.days[currentDay] = { ...wk.days[currentDay], data: r.data };
+      if (wk && wk.days[currentDay]){
+        wk.days[currentDay] = { ...wk.days[currentDay], data: logRes.data };
+        if (notesRes && notesRes.ok){
+          wk.days[currentDay].exercises = wk.days[currentDay].exercises.map((ex, i) => ({ ...ex, notes: coachNotes[i] }));
+          wk.isCustom = notesRes.isCustom;
+          resetPlanBtn.hidden = !(currentWeek !== 1 && wk.isCustom);
+          exWrap.querySelectorAll('.ex-card').forEach((card, i) => { card.dataset.origCoachNote = coachNotes[i] || ''; });
+        }
+      }
       progressLoaded = false;
       if (!progressWrap.hidden) await renderProgress();
       saveBtn.textContent = 'Saved ✓'; setTimeout(() => { saveBtn.textContent = 'Save'; saveBtn.disabled = false; }, 1200);
@@ -1444,8 +1532,8 @@ function buildExRow(container, ex){
   const row = el(`
     <div class="stack-sm ex-row" style="border:1px solid var(--border);border-radius:10px;padding:10px;">
       <div class="row" style="align-items:center;">
-        <input type="text" class="x-name" placeholder="Exercise name" value="${(ex && ex.name) || ''}" style="flex:2;">
-        <input type="number" class="x-sets" placeholder="Sets" min="1" max="12" value="${(ex && ex.setsCount) || 3}" style="max-width:110px;">
+        <input type="text" class="x-name" placeholder="Exercise name" value="${(ex && ex.name) || ''}" style="flex:3 1 120px;min-width:0;">
+        <input type="number" class="x-sets" placeholder="Sets" min="1" max="12" value="${(ex && ex.setsCount) || 3}" style="flex:0 0 64px;">
         <button type="button" class="icon-btn move-up-row" title="Move up">↑</button>
         <button type="button" class="icon-btn move-down-row" title="Move down">↓</button>
         <button type="button" class="icon-btn remove-row">×</button>
