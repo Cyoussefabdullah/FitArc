@@ -724,6 +724,54 @@ function buildCardioSection(cardio){
   return wrap;
 }
 
+// ---------------- Month 1 / 2 / 3 containers ----------------
+// A "month" is always exactly 4 weeks (MONTH_LEN), matching the backend
+// exactly (see action.js). Weeks stay flat/sequential (1,2,3...) in the data
+// -- this is purely how the tab UI groups them and auto-focuses the client's
+// CURRENT month, tucking already-finished months away behind a toggle
+// instead of listing every week flat across the whole subscription.
+const MONTH_LEN = 4;
+function monthAnchorWeek(weekNumber){ return Math.floor((weekNumber - 1) / MONTH_LEN) * MONTH_LEN + 1; }
+function monthNumberOf(weekNumber){ return Math.floor((weekNumber - 1) / MONTH_LEN) + 1; }
+
+// Builds the "Month 1 / Month 2 / ..." tab row. Months strictly before
+// `defaultMonth` (the month containing the client's currently-active week)
+// collapse behind a "◂ Previous Months" toggle by default -- the current
+// (and any future, already-added) months are shown as normal tabs so the
+// coach can prep ahead. `onSelect(monthNumber)` fires whenever the selection
+// changes, including from clicking a tab inside the collapsed list.
+function buildMonthTabs(totalWeeks, activeWeek, onSelect, initialMonth){
+  const totalMonths = Math.max(1, Math.ceil(totalWeeks / MONTH_LEN));
+  const defaultMonth = Math.min(monthNumberOf(Math.min(activeWeek, totalWeeks)), totalMonths);
+  let selected = (initialMonth && initialMonth >= 1 && initialMonth <= totalMonths) ? initialMonth : defaultMonth;
+  let expanded = selected < defaultMonth;
+  const wrap = el(`<div class="week-tabs"></div>`);
+  function render(){
+    wrap.innerHTML = '';
+    const pastMonths = [];
+    for (let m = 1; m < defaultMonth; m++) pastMonths.push(m);
+    if (pastMonths.length){
+      const toggle = el(`<button type="button" class="week-tab">${expanded ? '▾' : '▸'} Previous Months (${pastMonths.length})</button>`);
+      toggle.addEventListener('click', () => { expanded = !expanded; render(); });
+      wrap.appendChild(toggle);
+      if (expanded){
+        pastMonths.forEach(m => {
+          const b = el(`<button type="button" class="week-tab${m===selected?' active':''}">Month ${m}</button>`);
+          b.addEventListener('click', () => { if (selected===m) return; selected = m; render(); onSelect(m); });
+          wrap.appendChild(b);
+        });
+      }
+    }
+    for (let m = defaultMonth; m <= totalMonths; m++){
+      const b = el(`<button type="button" class="week-tab${m===selected?' active':''}">Month ${m}</button>`);
+      b.addEventListener('click', () => { if (selected===m) return; selected = m; render(); onSelect(m); });
+      wrap.appendChild(b);
+    }
+  }
+  render();
+  return { el: wrap, getSelected: () => selected };
+}
+
 // ---------------- client workout tab ----------------
 async function renderClientWorkoutTab(content, clientId){
   content.innerHTML = '';
@@ -737,34 +785,59 @@ async function renderClientWorkoutTab(content, clientId){
     content.appendChild(el(`<div class="card" style="text-align:center;"><p>Your coach hasn't set up your workout plan yet.</p></div>`));
     return;
   }
-  let currentWeek = 1;
-  let currentDay = 0;
   // a client can only open week N once they've submitted (N-1) weekly check-ins --
   // week 1 is always open. This does NOT apply to the coach's admin view (renderWorkoutAdminTab),
-  // which always has full access to every week.
+  // which always has full access to every week's plan (only the LOGGED NUMBERS
+  // get locked there too, once a week has passed -- see below).
   const checkinsCount = all.checkinsCount || 0;
   const unlockedThroughWeek = checkinsCount + 1;
-  const weekTabsWrap = el(`<div class="week-tabs"></div>`);
-  for (let w = 1; w <= all.totalWeeks; w++){
-    const locked = w > unlockedThroughWeek;
-    const b = el(`<button type="button" class="week-tab${w===1?' active':''}${locked?' locked':''}">${locked ? '🔒 ' : ''}Week ${w}</button>`);
-    if (locked){
-      b.disabled = true;
-      b.title = "Submit this week's check-in to unlock the next week";
-    } else {
-      b.addEventListener('click', () => { currentWeek = w; currentDay = 0; weekTabsWrap.querySelectorAll('.week-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); loadWeek(w); });
-    }
-    weekTabsWrap.appendChild(b);
-  }
+  let currentWeek = Math.min(unlockedThroughWeek, all.totalWeeks);
+  let currentDay = 0;
+
+  const monthTabs = buildMonthTabs(all.totalWeeks, unlockedThroughWeek, (m) => { selectMonth(m); });
+  content.appendChild(monthTabs.el);
+
+  const weekTabsWrap = el(`<div class="week-tabs" style="margin-top:6px;"></div>`);
   content.appendChild(weekTabsWrap);
+
+  function renderWeekTabs(){
+    weekTabsWrap.innerHTML = '';
+    const monthNum = monthTabs.getSelected();
+    const anchor = (monthNum - 1) * MONTH_LEN + 1;
+    for (let w = anchor; w < anchor + MONTH_LEN && w <= all.totalWeeks; w++){
+      const locked = w > unlockedThroughWeek;
+      const past = w < unlockedThroughWeek;
+      const b = el(`<button type="button" class="week-tab${w===currentWeek?' active':''}${locked?' locked':''}">${locked ? '🔒 ' : (past ? '📖 ' : '')}Week ${w}</button>`);
+      if (locked){
+        b.disabled = true;
+        b.title = "Submit this week's check-in to unlock the next week";
+      } else {
+        b.addEventListener('click', () => { currentWeek = w; currentDay = 0; renderWeekTabs(); loadWeek(w); });
+      }
+      weekTabsWrap.appendChild(b);
+    }
+  }
+  function selectMonth(m){
+    const anchor = (m - 1) * MONTH_LEN + 1;
+    currentWeek = (currentWeek >= anchor && currentWeek < anchor + MONTH_LEN) ? currentWeek : Math.min(anchor, all.totalWeeks);
+    currentDay = 0;
+    renderWeekTabs();
+    loadWeek(currentWeek);
+  }
+  renderWeekTabs();
+
   if (unlockedThroughWeek < all.totalWeeks){
     content.appendChild(el(`<p class="field-hint" style="margin-top:-8px;">🔒 Submit this week's check-in (in the Check-in tab) to unlock next week's workout log.</p>`));
   }
+  const pastNoticeWrap = el(`<div></div>`);
+  content.appendChild(pastNoticeWrap);
 
   // day tabs nested under the selected week -- which days exist, and what's
   // in each one, can differ per week since a week's plan can be customized.
   const dayTabsWrap = el(`<div class="week-tabs" style="margin-top:6px;"></div>`);
   content.appendChild(dayTabsWrap);
+  const monthEmptyWrap = el(`<div></div>`);
+  content.appendChild(monthEmptyWrap);
 
   const planSectionsWrap = el(`<div></div>`);
   content.appendChild(planSectionsWrap);
@@ -843,6 +916,14 @@ async function renderClientWorkoutTab(content, clientId){
     if (!day){ exWrap.innerHTML = ''; planSectionsWrap.innerHTML = ''; return; }
     renderPlanSections(day);
     exWrap.innerHTML = '';
+    // once the client has moved past a week (submitted the check-in that
+    // unlocked the next one), its logged numbers are frozen -- they can
+    // still look back at what they logged, just not change it.
+    const readOnly = currentWeek < unlockedThroughWeek;
+    pastNoticeWrap.innerHTML = readOnly
+      ? `<p class="field-hint" style="margin-top:-8px;">📖 This week has passed — you can view what you logged, but it's locked from further changes.</p>`
+      : '';
+    saveBtn.hidden = readOnly;
     const log = (all.logsByWeek[currentWeek] && all.logsByWeek[currentWeek][currentDay]) || [];
     day.exercises.forEach((ex, i) => {
       const sets = (log[i]) ? log[i].sets : Array.from({length: ex.setsCount}, () => ({weight:'', reps:''}));
@@ -862,8 +943,8 @@ async function renderClientWorkoutTab(content, clientId){
         const row = el(`
           <div class="set-row">
             <span class="set-label">Set ${si+1}</span>
-            <input type="text" inputmode="decimal" placeholder="Weight" class="set-weight" value="${s.weight || ''}" style="max-width:100px;">
-            <input type="text" inputmode="numeric" placeholder="Reps" class="set-reps" value="${s.reps || ''}" style="max-width:90px;">
+            <input type="text" inputmode="decimal" placeholder="Weight" class="set-weight" value="${s.weight || ''}" style="max-width:100px;" ${readOnly?'readonly disabled':''}>
+            <input type="text" inputmode="numeric" placeholder="Reps" class="set-reps" value="${s.reps || ''}" style="max-width:90px;" ${readOnly?'readonly disabled':''}>
           </div>
         `);
         setsArea.appendChild(row);
@@ -871,7 +952,7 @@ async function renderClientWorkoutTab(content, clientId){
       card.appendChild(el(`
         <div class="stack-sm" style="margin-top:8px;">
           <div class="field-hint">Your notes</div>
-          <textarea class="ex-note">${existingNote}</textarea>
+          <textarea class="ex-note" ${readOnly?'readonly':''}>${existingNote}</textarea>
         </div>
       `));
       exWrap.appendChild(card);
@@ -880,11 +961,20 @@ async function renderClientWorkoutTab(content, clientId){
 
   function loadWeek(weekNum){
     const wk = planForWeek(weekNum);
+    if (!wk.days.length){
+      dayTabsWrap.innerHTML = ''; planSectionsWrap.innerHTML = ''; exWrap.innerHTML = '';
+      stretchSectionWrap.innerHTML = ''; cardioSectionWrap.innerHTML = ''; pastNoticeWrap.innerHTML = '';
+      saveBtn.hidden = true;
+      monthEmptyWrap.innerHTML = '';
+      monthEmptyWrap.appendChild(el(`<div class="card" style="text-align:center;"><p>Your coach hasn't set up this month's plan yet.</p></div>`));
+      return;
+    }
+    monthEmptyWrap.innerHTML = '';
     currentDay = Math.min(currentDay, Math.max(0, wk.days.length - 1));
     renderDayTabs(wk);
     renderDayContent(wk);
   }
-  loadWeek(1);
+  loadWeek(currentWeek);
 
   saveBtn.addEventListener('click', async () => {
     const data = [];
@@ -1267,10 +1357,14 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
   catch(err){ return renderConnectionError(() => renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefresh, initialWeek)); }
   content.innerHTML = '';
 
-  // keep the coach on the week they were just viewing/editing across a
-  // refresh (e.g. right after saving a specific week's plan), instead of
-  // always jumping back to Week 1.
-  let currentWeek = (initialWeek && initialWeek >= 1 && initialWeek <= totalWeeks) ? initialWeek : 1;
+  // The client's current active week (same definition as the lock on logged
+  // numbers below): submitting check-in N unlocks week N+1. Defaults the
+  // coach's view to whichever month that week is in, instead of always
+  // Week 1 -- "the current one opens automatically" -- but a refresh right
+  // after editing a specific week (onRefresh(weekNumber)) still wins.
+  const checkinsCount = week1.checkinsCount || 0;
+  const activeWeek = checkinsCount + 1;
+  let currentWeek = (initialWeek && initialWeek >= 1 && initialWeek <= totalWeeks) ? initialWeek : Math.min(activeWeek, totalWeeks);
   let currentDay = 0;
   let weekCache = { 1: week1 };
 
@@ -1291,21 +1385,25 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
   const resetPlanBtn = topRow.querySelector('#reset-plan-btn');
   editPlanBtn.addEventListener('click', () => {
     const wk = weekCache[currentWeek];
-    openWorkoutPlanEditor(pw, clientId, currentWeek, wk.days, () => onRefresh(currentWeek));
+    openWorkoutPlanEditor(pw, clientId, currentWeek, (wk && wk.days) || [], () => onRefresh(currentWeek));
   });
   resetPlanBtn.addEventListener('click', async () => {
-    if (!confirm(`This will delete the custom plan for Week ${currentWeek} and go back to Week 1's plan. Are you sure?`)) return;
+    const label = resetPlanBtn.textContent;
+    if (!confirm(`This will delete the custom plan for Week ${currentWeek} (${label}). Are you sure?`)) return;
     const r = await api('resetWorkoutPlanWeek', {password: pw, clientId, weekNumber: currentWeek});
     if (r.ok){ onRefresh(currentWeek); }
   });
   topRow.querySelector('#add-month-btn').addEventListener('click', async () => {
     const r = await api('addMonth', {password: pw, clientId});
-    if (r.ok) onRefresh(currentWeek);
+    // jump straight to the new (empty) month's first week so the coach can
+    // start setting it up right away, instead of staying on whatever week
+    // they happened to be viewing before.
+    if (r.ok) onRefresh(r.totalWeeks - MONTH_LEN + 1);
   });
   topRow.querySelector('#remove-month-btn').addEventListener('click', async () => {
     if (!confirm('This will delete the last 4 weeks and any logged data in them. Are you sure?')) return;
     const r = await api('removeMonth', {password: pw, clientId});
-    if (r.ok) onRefresh(currentWeek);
+    if (r.ok) onRefresh(Math.min(currentWeek, r.totalWeeks));
     else alert(r.error === 'cannot_remove_last_weeks' ? 'Cannot remove all weeks.' : 'Something went wrong.');
   });
 
@@ -1314,13 +1412,35 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
     return;
   }
 
-  const weekTabsWrap = el(`<div class="week-tabs"></div>`);
-  for (let w = 1; w <= totalWeeks; w++){
-    const b = el(`<button type="button" class="week-tab${w===currentWeek?' active':''}">Week ${w}</button>`);
-    b.addEventListener('click', () => { currentWeek = w; currentDay = 0; weekTabsWrap.querySelectorAll('.week-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); loadWeek(w); });
-    weekTabsWrap.appendChild(b);
-  }
+  const monthTabs = buildMonthTabs(totalWeeks, activeWeek, (m) => { selectMonth(m); }, monthNumberOf(currentWeek));
+  content.appendChild(monthTabs.el);
+
+  const weekTabsWrap = el(`<div class="week-tabs" style="margin-top:6px;"></div>`);
   content.appendChild(weekTabsWrap);
+
+  function renderWeekTabs(){
+    weekTabsWrap.innerHTML = '';
+    const monthNum = monthTabs.getSelected();
+    const anchor = (monthNum - 1) * MONTH_LEN + 1;
+    for (let w = anchor; w < anchor + MONTH_LEN && w <= totalWeeks; w++){
+      const past = w < activeWeek;
+      const b = el(`<button type="button" class="week-tab${w===currentWeek?' active':''}">${past ? '📖 ' : ''}Week ${w}</button>`);
+      b.addEventListener('click', () => { currentWeek = w; currentDay = 0; renderWeekTabs(); loadWeek(w); });
+      weekTabsWrap.appendChild(b);
+    }
+  }
+  function selectMonth(m){
+    const anchor = (m - 1) * MONTH_LEN + 1;
+    currentWeek = (currentWeek >= anchor && currentWeek < anchor + MONTH_LEN) ? currentWeek : Math.min(anchor, totalWeeks);
+    currentDay = 0;
+    renderWeekTabs();
+    loadWeek(currentWeek);
+  }
+  renderWeekTabs();
+  const monthEmptyWrap = el(`<div></div>`);
+  content.appendChild(monthEmptyWrap);
+  const pastNoticeWrap = el(`<div></div>`);
+  content.appendChild(pastNoticeWrap);
 
   // day tabs nested under the selected week -- which days exist, and what's
   // in each one, can differ per week since a week's plan can be customized.
@@ -1406,6 +1526,13 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
     if (!day){ exWrap.innerHTML = ''; planSectionsWrap.innerHTML = ''; return; }
     renderPlanSections(day);
     exWrap.innerHTML = '';
+    // once the client has moved past this week, its LOGGED NUMBERS are
+    // frozen for the coach too (plan/notes editing is unaffected -- only the
+    // sets/reps inputs below get locked).
+    const logLocked = currentWeek < activeWeek;
+    pastNoticeWrap.innerHTML = logLocked
+      ? `<p class="field-hint" style="margin-top:-8px;">📖 This week has passed — the client's logged numbers are locked. You can still edit the plan/notes.</p>`
+      : '';
     day.exercises.forEach((ex, i) => {
       const sets = (day.data[i]) ? day.data[i].sets : [];
       const existingNote = (day.data[i] && day.data[i].note) || '';
@@ -1436,13 +1563,24 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
         setsArea.appendChild(el(`
           <div class="set-row">
             <span class="set-label">Set ${si+1}</span>
-            <input type="text" inputmode="decimal" placeholder="Weight" class="set-weight" value="${s.weight || ''}" style="max-width:100px;">
-            <input type="text" inputmode="numeric" placeholder="Reps" class="set-reps" value="${s.reps || ''}" style="max-width:90px;">
+            <input type="text" inputmode="decimal" placeholder="Weight" class="set-weight" value="${s.weight || ''}" style="max-width:100px;" ${logLocked?'readonly disabled':''}>
+            <input type="text" inputmode="numeric" placeholder="Reps" class="set-reps" value="${s.reps || ''}" style="max-width:90px;" ${logLocked?'readonly disabled':''}>
           </div>
         `));
       });
       exWrap.appendChild(card);
     });
+  }
+
+  // Context-aware label for the "Reset" button: Month 1 (and any already-live
+  // week that predates this per-month model) always falls back to the global
+  // Week 1 plan, same as before -- but a Month 2+ week on a client who starts
+  // fresh under the new model falls back to THAT month's own first week
+  // instead, so the label shouldn't claim "Week 1" for those.
+  function resetLabelFor(weekNum, wk){
+    if (monthNumberOf(weekNum) === 1) return 'Reset to Week 1 Plan';
+    if (weekNum === monthAnchorWeek(weekNum)) return "Clear This Month's Plan";
+    return `Reset to Month ${monthNumberOf(weekNum)}'s Week 1`;
   }
 
   async function loadWeek(weekNum){
@@ -1451,6 +1589,15 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
     if (!wk){ wk = await api('getWorkoutWeekAdmin', {password: pw, clientId, weekNumber: weekNum}); weekCache[weekNum] = wk; }
     editPlanBtn.textContent = `Edit Week ${weekNum} Plan`;
     resetPlanBtn.hidden = !(weekNum !== 1 && wk.isCustom);
+    resetPlanBtn.textContent = resetLabelFor(weekNum, wk);
+    if (!wk.days.length){
+      dayTabsWrap.innerHTML = ''; planSectionsWrap.innerHTML = ''; exWrap.innerHTML = '';
+      stretchSectionWrap.innerHTML = ''; cardioSectionWrap.innerHTML = ''; pastNoticeWrap.innerHTML = '';
+      monthEmptyWrap.innerHTML = '';
+      monthEmptyWrap.appendChild(el(`<div class="card"><p>Month ${monthNumberOf(weekNum)} hasn't been set up yet. Click "Edit Week ${weekNum} Plan" to add its first week.</p></div>`));
+      return;
+    }
+    monthEmptyWrap.innerHTML = '';
     currentDay = Math.min(currentDay, Math.max(0, wk.days.length - 1));
     renderDayTabs(wk);
     renderDayContent(wk);
@@ -1472,24 +1619,30 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
       if (noteVal !== (card.dataset.origCoachNote || '')) notesChanged = true;
     });
     saveBtn.disabled = true; saveBtn.textContent = 'Saving...';
-    // Always saves the sets/reps log. Only also touches the plan's exercise
-    // notes -- and only then creates a per-week customization for a week
-    // that was still inheriting Week 1's plan -- when a note actually
-    // changed, so pressing Save to log numbers (no note edited) never
-    // silently turns an inherited week into a customized one.
-    const calls = [ api('saveWorkoutLog', {password: pw, clientId, weekNumber: currentWeek, dayIndex: currentDay, data}) ];
+    // Always saves the sets/reps log -- UNLESS this week has passed, in which
+    // case the numbers are frozen (see saveWorkoutLog in action.js) and the
+    // inputs are readonly anyway, so there's nothing to send. Only also
+    // touches the plan's exercise notes -- and only then creates a per-week
+    // customization for a week that was still inheriting -- when a note
+    // actually changed, so pressing Save to log numbers (no note edited)
+    // never silently turns an inherited week into a customized one.
+    const logLocked = currentWeek < activeWeek;
+    const calls = logLocked ? [] : [ api('saveWorkoutLog', {password: pw, clientId, weekNumber: currentWeek, dayIndex: currentDay, data}) ];
     if (notesChanged){
       calls.push(api('saveExerciseNotes', {password: pw, clientId, weekNumber: currentWeek, dayIndex: currentDay, notes: coachNotes}));
     }
-    const [logRes, notesRes] = await Promise.all(calls);
+    const results = await Promise.all(calls);
+    const logRes = logLocked ? { ok: true } : results[0];
+    const notesRes = notesChanged ? results[results.length - 1] : null;
     if (logRes.ok && (!notesRes || notesRes.ok)){
       const wk = weekCache[currentWeek];
       if (wk && wk.days[currentDay]){
-        wk.days[currentDay] = { ...wk.days[currentDay], data: logRes.data };
+        if (logRes.data) wk.days[currentDay] = { ...wk.days[currentDay], data: logRes.data };
         if (notesRes && notesRes.ok){
           wk.days[currentDay].exercises = wk.days[currentDay].exercises.map((ex, i) => ({ ...ex, notes: coachNotes[i] }));
           wk.isCustom = notesRes.isCustom;
           resetPlanBtn.hidden = !(currentWeek !== 1 && wk.isCustom);
+          resetPlanBtn.textContent = resetLabelFor(currentWeek, wk);
           exWrap.querySelectorAll('.ex-card').forEach((card, i) => { card.dataset.origCoachNote = coachNotes[i] || ''; });
         }
       }
@@ -2222,6 +2375,7 @@ function renderSubscriptionAdminTab(content, pw, clientId, c){
         <select id="renew-plan"><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option></select>
         <button class="btn btn-sm" id="renew-btn">Renew Subscription (starts today)</button>
       </div>
+      <p class="field-hint" style="margin-top:8px;">Renewing keeps the client's existing month(s) exactly as they are and adds new month(s) on top: Monthly adds 1 new month, Quarterly adds 3.</p>
     </div>
   `));
   content.querySelector('#renew-btn').addEventListener('click', async () => {
