@@ -7,6 +7,25 @@ const ADMIN_PASSWORD = 'Joe2002';
 const PLAN_DAYS = { monthly: 30, quarterly: 90 };
 const PLAN_WEEKS = { monthly: 4, quarterly: 12 };
 
+// A "month" is always exactly 4 weeks (matches the monthly plan length).
+// Weeks stay a single flat, sequential number per client (1, 2, 3...) in the
+// database -- nothing about storage changes -- "month" is just how those
+// numbers are grouped and how far the per-week inheritance chain reaches:
+// week W belongs to month ceil(W/4), and that month's own first week ("the
+// month's Week 1") is weeks (2-4 of a LATER month) fall back to -- never the
+// client's global Week 1 (see getWorkoutPlanForWeek below for the full rule,
+// including the one-time legacy_boundary_week cutover for weeks that already
+// existed before this model shipped).
+const MONTH_LEN = 4;
+// How many new months a renewal adds on TOP of whatever weeks the client
+// already has (the existing month(s) are never touched/reset) -- matches
+// PLAN_WEEKS above (monthly = 1 month = 4 weeks, quarterly = 3 months = 12).
+const MONTHS_PER_RENEWAL = { monthly: 1, quarterly: 3 };
+
+function monthAnchorWeek(weekNumber) {
+  return Math.floor((weekNumber - 1) / MONTH_LEN) * MONTH_LEN + 1;
+}
+
 function checkPassword(pw) {
   return pw === ADMIN_PASSWORD;
 }
@@ -213,6 +232,11 @@ async function getClientAssessment(pw, clientId) {
 
 // ---------- Weekly check-in ----------
 
+async function checkinsCountFor(clientId) {
+  const rows = await sql`SELECT COUNT(*)::int AS count FROM checkins WHERE client_id = ${clientId}`;
+  return rows[0] ? rows[0].count : 0;
+}
+
 async function lastCheckinForClient(clientId) {
   const rows = await sql`
     SELECT week_number AS "weekNumber", checkin_date AS "checkinDate",
@@ -275,11 +299,21 @@ async function listCheckins(pw) {
 
 // ---------- Subscription ----------
 
+// Renewing ADDS months on top of whatever the client already has -- it never
+// resets or touches the weeks/plan they already have. A monthly renewal adds
+// 1 new (empty, not-yet-set-up) month; a quarterly renewal adds 3. The plan
+// type and start_date (which drive the subscription end-date/days-remaining
+// display) are reset to today either way, since that's what "renew" means
+// for billing purposes -- only the WEEKS are purely additive.
 async function renewSubscription(pw, clientId, plan) {
   if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
   if (!clientId || !PLAN_WEEKS[plan]) return { ok: false, error: 'invalid_input' };
-  await sql`UPDATE clients SET plan = ${plan}, start_date = ${todayStr()} WHERE id = ${clientId}`;
-  return { ok: true };
+  const c = await getClientRow(clientId);
+  if (!c) return { ok: false, error: 'invalid_id' };
+  const monthsAdded = MONTHS_PER_RENEWAL[plan] || 1;
+  const newTotal = c.total_weeks + monthsAdded * MONTH_LEN;
+  await sql`UPDATE clients SET plan = ${plan}, start_date = ${todayStr()}, total_weeks = ${newTotal} WHERE id = ${clientId}`;
+  return { ok: true, totalWeeks: newTotal, monthsAdded };
 }
 
 // ---------- Workout weeks (add/remove a month = 4 weeks) ----------
@@ -288,7 +322,7 @@ async function addMonth(pw, clientId) {
   if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
   const c = await getClientRow(clientId);
   if (!c) return { ok: false, error: 'invalid_id' };
-  const newTotal = c.total_weeks + 4;
+  const newTotal = c.total_weeks + MONTH_LEN;
   await sql`UPDATE clients SET total_weeks = ${newTotal} WHERE id = ${clientId}`;
   return { ok: true, totalWeeks: newTotal };
 }
@@ -297,11 +331,15 @@ async function removeMonth(pw, clientId) {
   if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
   const c = await getClientRow(clientId);
   if (!c) return { ok: false, error: 'invalid_id' };
-  const newTotal = c.total_weeks - 4;
+  const newTotal = c.total_weeks - MONTH_LEN;
   if (newTotal < 1) return { ok: false, error: 'cannot_remove_last_weeks' };
   await sql`DELETE FROM workout_logs WHERE client_id = ${clientId} AND week_number > ${newTotal}`;
   await sql`DELETE FROM workout_plan_weeks WHERE client_id = ${clientId} AND week_number > ${newTotal}`;
-  await sql`UPDATE clients SET total_weeks = ${newTotal} WHERE id = ${clientId}`;
+  // legacy_boundary_week must never exceed the (now smaller) total_weeks --
+  // otherwise a later re-add of that same month would wrongly be treated as
+  // "legacy" (global Week-1 fallback) instead of starting fresh per the new
+  // per-month model.
+  await sql`UPDATE clients SET total_weeks = ${newTotal}, legacy_boundary_week = LEAST(legacy_boundary_week, ${newTotal}) WHERE id = ${clientId}`;
   return { ok: true, totalWeeks: newTotal };
 }
 
@@ -461,29 +499,72 @@ async function saveWorkoutPlan(pw, clientId, days) {
   return { ok: true, days: cleanDays };
 }
 
-// Per-week plan: week 1 IS the base plan (workout_plan). Any other week falls
-// back to that same base plan unless the coach has specifically customized it
-// (a row in workout_plan_weeks), in which case that override is used instead.
-async function getWorkoutPlanForWeek(clientId, weekNumber) {
-  const base = await getWorkoutPlan(clientId);
-  if (weekNumber === 1) return { ...base, isCustom: false };
+// Per-week plan. The rule (revision: Month 1/2/3 containers):
+//
+//  - Week 1 (globally) IS the base plan (workout_plan) -- always, unchanged.
+//  - Any OTHER week in MONTH 1 (weeks 2-4) falls back to that same global
+//    Week 1 base unless the coach customized it -- exactly as before this
+//    revision, because Month 1 was never the thing clients complained about
+//    "blending" (there's nothing before it to blend with).
+//  - A week that already EXISTED before this revision shipped (week number
+//    <= the client's legacy_boundary_week, frozen once at migration time --
+//    see schema.sql) ALSO keeps falling back to the global Week 1 base, so
+//    nothing already live changes how it looks.
+//  - A genuinely NEW week (month 2+, added after this revision via +Month or
+//    a renewal) never falls back to the global Week 1. Instead each month is
+//    its own container: that month's OWN first week ("the month's Week 1")
+//    is either explicitly set up by the coach (its own row in
+//    workout_plan_weeks) or empty (monthNotSetUp: true) until it is: weeks
+//    2-4 of that SAME month fall back to THAT week only, never to any other
+//    month's plan.
+async function getWorkoutPlanForWeek(clientId, weekNumber, clientRow) {
+  if (weekNumber === 1) {
+    const base = await getWorkoutPlan(clientId);
+    return { ...base, isCustom: false };
+  }
   const rows = await sql`SELECT days FROM workout_plan_weeks WHERE client_id = ${clientId} AND week_number = ${weekNumber}`;
-  if (!rows.length) return { ...base, isCustom: false };
-  return { days: sanitizeWorkoutDays(rows[0].days), isCustom: true };
+  if (rows.length) return { days: sanitizeWorkoutDays(rows[0].days), isCustom: true };
+
+  const anchor = monthAnchorWeek(weekNumber);
+  if (anchor === 1) {
+    const base = await getWorkoutPlan(clientId);
+    return { ...base, isCustom: false };
+  }
+  const c = clientRow || await getClientRow(clientId);
+  const legacyBoundary = (c && c.legacy_boundary_week) || 0;
+  if (weekNumber <= legacyBoundary) {
+    const base = await getWorkoutPlan(clientId);
+    return { ...base, isCustom: false };
+  }
+  if (anchor === weekNumber) {
+    // this IS the month's own first week, and the coach hasn't set it up yet.
+    return { days: [], isCustom: false, monthNotSetUp: true };
+  }
+  const anchorRows = await sql`SELECT days FROM workout_plan_weeks WHERE client_id = ${clientId} AND week_number = ${anchor}`;
+  if (anchorRows.length) return { days: sanitizeWorkoutDays(anchorRows[0].days), isCustom: false };
+  return { days: [], isCustom: false, monthNotSetUp: true };
 }
 
-// Builds { 1: {days, isCustom}, 2: {...}, ... } for every week 1..totalWeeks
-// in a single pass (one query for all overrides, instead of one query per
-// week) -- used by the "load everything at once" endpoints.
-async function buildPlansByWeek(clientId, totalWeeks, base) {
+// Builds { 1: {days, isCustom, monthNotSetUp}, 2: {...}, ... } for every week
+// 1..totalWeeks in a single pass (two queries total, not one per week) --
+// used by the "load everything at once" endpoints. Mirrors
+// getWorkoutPlanForWeek's fallback rule exactly -- see the comment above it.
+async function buildPlansByWeek(clientId, totalWeeks, base, clientRow) {
   const overrideRows = await sql`SELECT week_number AS "weekNumber", days FROM workout_plan_weeks WHERE client_id = ${clientId}`;
   const overridesByWeek = {};
   overrideRows.forEach(r => {
-    overridesByWeek[r.weekNumber] = { days: sanitizeWorkoutDays(r.days), isCustom: true };
+    overridesByWeek[r.weekNumber] = sanitizeWorkoutDays(r.days);
   });
+  const legacyBoundary = (clientRow && clientRow.legacy_boundary_week) || 0;
   const plansByWeek = {};
   for (let w = 1; w <= totalWeeks; w++) {
-    plansByWeek[w] = (w !== 1 && overridesByWeek[w]) ? overridesByWeek[w] : { ...base, isCustom: false };
+    if (w !== 1 && overridesByWeek[w]) { plansByWeek[w] = { days: overridesByWeek[w], isCustom: true }; continue; }
+    if (w === 1) { plansByWeek[w] = { ...base, isCustom: false }; continue; }
+    const anchor = monthAnchorWeek(w);
+    if (anchor === 1 || w <= legacyBoundary) { plansByWeek[w] = { ...base, isCustom: false }; continue; }
+    if (anchor === w) { plansByWeek[w] = { days: [], isCustom: false, monthNotSetUp: true }; continue; }
+    if (overridesByWeek[anchor]) { plansByWeek[w] = { days: overridesByWeek[anchor], isCustom: false }; continue; }
+    plansByWeek[w] = { days: [], isCustom: false, monthNotSetUp: true };
   }
   return plansByWeek;
 }
@@ -504,13 +585,16 @@ async function saveWorkoutPlanForWeek(pw, clientId, weekNumber, days) {
   return { ok: true, days: cleanDays, isCustom: true };
 }
 
-// Removes a week's customization so it goes back to inheriting the base (Week 1) plan.
+// Removes a week's customization so it goes back to inheriting from whatever
+// it would otherwise inherit from (the global Week 1 base for a legacy/Month-1
+// week, or this month's own first week for a newer Month 2+ week -- see
+// getWorkoutPlanForWeek above, which this reuses so the two can never drift).
 async function resetWorkoutPlanWeek(pw, clientId, weekNumber) {
   if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
   if (!clientId || !weekNumber || weekNumber === 1) return { ok: false, error: 'invalid_input' };
   await sql`DELETE FROM workout_plan_weeks WHERE client_id = ${clientId} AND week_number = ${weekNumber}`;
-  const base = await getWorkoutPlan(clientId);
-  return { ok: true, days: base.days, isCustom: false };
+  const result = await getWorkoutPlanForWeek(clientId, weekNumber);
+  return { ok: true, days: result.days, isCustom: result.isCustom, monthNotSetUp: !!result.monthNotSetUp };
 }
 
 // ---------- Workout plan templates (reusable, saved independently of any client) ----------
@@ -666,7 +750,8 @@ async function getWorkoutWeek(clientId, weekNumber) {
     cardio: day.cardio,
     data: sanitizeLogData(logsByDay[i] || [], day.exercises),
   }));
-  return { days, isCustom: plan.isCustom };
+  const checkinsCount = await checkinsCountFor(clientId);
+  return { days, isCustom: plan.isCustom, monthNotSetUp: !!plan.monthNotSetUp, checkinsCount };
 }
 
 async function getWorkoutWeekAdmin(pw, clientId, weekNumber) {
@@ -696,6 +781,14 @@ async function writeWorkoutLog(clientId, weekNumber, dayIndex, data) {
 async function saveWorkoutLog(pw, clientId, weekNumber, dayIndex, data) {
   if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
   if (!clientId || !weekNumber || dayIndex == null) return { ok: false, error: 'invalid_input' };
+  // Once the client has moved past a week (submitted the check-in that
+  // unlocked the next one), its logged numbers are frozen for EVERYONE,
+  // coach included -- no going back to tweak a past week's weights/reps.
+  // This only locks the numbers logged here; the plan/structure for that
+  // week (exercises, notes, etc.) can still be edited via Edit Plan /
+  // saveExerciseNotes regardless of this lock.
+  const checkinsCount = await checkinsCountFor(clientId);
+  if (weekNumber < checkinsCount + 1) return { ok: false, error: 'week_passed' };
   const clean = await writeWorkoutLog(clientId, weekNumber, dayIndex, data);
   return { ok: true, data: clean };
 }
@@ -739,11 +832,14 @@ async function logWorkout(clientId, weekNumber, dayIndex, data) {
   if (!c) return { ok: false, error: 'invalid_id' };
   // mirror the client-side week lock: a client can only log week N once they've
   // submitted (N-1) weekly check-ins. Enforced here too so the lock can't be
-  // bypassed by calling the API directly. The coach (saveWorkoutLog, password-gated)
-  // is never subject to this -- they can always edit any week.
-  const checkinCountRows = await sql`SELECT COUNT(*)::int AS count FROM checkins WHERE client_id = ${clientId}`;
-  const checkinsCount = checkinCountRows[0] ? checkinCountRows[0].count : 0;
+  // bypassed by calling the API directly. The client can ONLY ever write to
+  // the single currently-active week (checkinsCount + 1) -- not a future week
+  // (unchanged rule) and, as of this revision, not a past one either (once
+  // they've moved on, that week's numbers are frozen -- see saveWorkoutLog
+  // above, which applies the exact same freeze to the coach's own edits).
+  const checkinsCount = await checkinsCountFor(clientId);
   if (weekNumber > checkinsCount + 1) return { ok: false, error: 'week_locked' };
+  if (weekNumber < checkinsCount + 1) return { ok: false, error: 'week_passed' };
   const clean = await writeWorkoutLog(clientId, weekNumber, dayIndex, data);
   return { ok: true, data: clean };
 }
@@ -767,10 +863,9 @@ async function getMyWorkoutAll(clientId) {
   const c = await getClientRow(clientId);
   if (!c) return { ok: false, error: 'invalid_id' };
   const plan = await getWorkoutPlan(clientId);
-  const plansByWeek = await buildPlansByWeek(clientId, c.total_weeks, plan);
+  const plansByWeek = await buildPlansByWeek(clientId, c.total_weeks, plan, c);
   const logsByWeek = await buildLogsByWeek(clientId, plansByWeek);
-  const checkinCountRows = await sql`SELECT COUNT(*)::int AS count FROM checkins WHERE client_id = ${clientId}`;
-  const checkinsCount = checkinCountRows[0] ? checkinCountRows[0].count : 0;
+  const checkinsCount = await checkinsCountFor(clientId);
   return { ok: true, days: plan.days, plansByWeek, totalWeeks: c.total_weeks, logsByWeek, checkinsCount };
 }
 
@@ -779,9 +874,10 @@ async function getClientWorkoutAll(pw, clientId) {
   const c = await getClientRow(clientId);
   if (!c) return { ok: false, error: 'invalid_id' };
   const plan = await getWorkoutPlan(clientId);
-  const plansByWeek = await buildPlansByWeek(clientId, c.total_weeks, plan);
+  const plansByWeek = await buildPlansByWeek(clientId, c.total_weeks, plan, c);
   const logsByWeek = await buildLogsByWeek(clientId, plansByWeek);
-  return { ok: true, days: plan.days, plansByWeek, totalWeeks: c.total_weeks, logsByWeek };
+  const checkinsCount = await checkinsCountFor(clientId);
+  return { ok: true, days: plan.days, plansByWeek, totalWeeks: c.total_weeks, logsByWeek, checkinsCount };
 }
 
 // ---------- Diet plan (fixed, split into days) ----------
