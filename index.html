@@ -740,10 +740,11 @@ function monthNumberOf(weekNumber){ return Math.floor((weekNumber - 1) / MONTH_L
 // (and any future, already-added) months are shown as normal tabs so the
 // coach can prep ahead. `onSelect(monthNumber)` fires whenever the selection
 // changes, including from clicking a tab inside the collapsed list.
-function buildMonthTabs(totalWeeks, activeWeek, onSelect, initialMonth){
+function buildMonthTabs(totalWeeks, activeWeek, onSelect, initialMonth, restrictFuture){
   const totalMonths = Math.max(1, Math.ceil(totalWeeks / MONTH_LEN));
   const defaultMonth = Math.min(monthNumberOf(Math.min(activeWeek, totalWeeks)), totalMonths);
   let selected = (initialMonth && initialMonth >= 1 && initialMonth <= totalMonths) ? initialMonth : defaultMonth;
+  if (restrictFuture && selected > defaultMonth) selected = defaultMonth;
   let expanded = selected < defaultMonth;
   const wrap = el(`<div class="week-tabs"></div>`);
   function render(){
@@ -762,9 +763,21 @@ function buildMonthTabs(totalWeeks, activeWeek, onSelect, initialMonth){
         });
       }
     }
+    // Months from defaultMonth (the one containing the active week) onward.
+    // When `restrictFuture` is set (client view), any month strictly after
+    // defaultMonth is locked (🔒, disabled) -- the client can't jump ahead
+    // into a month they haven't reached yet, even just to look. The coach's
+    // admin view never passes this flag, so it keeps full access to prep
+    // future months' plans ahead of time.
     for (let m = defaultMonth; m <= totalMonths; m++){
-      const b = el(`<button type="button" class="week-tab${m===selected?' active':''}">Month ${m}</button>`);
-      b.addEventListener('click', () => { if (selected===m) return; selected = m; render(); onSelect(m); });
+      const locked = !!restrictFuture && m > defaultMonth;
+      const b = el(`<button type="button" class="week-tab${m===selected?' active':''}${locked?' locked':''}">${locked ? '🔒 ' : ''}Month ${m}</button>`);
+      if (locked){
+        b.disabled = true;
+        b.title = "You'll be able to open this month once you reach it";
+      } else {
+        b.addEventListener('click', () => { if (selected===m) return; selected = m; render(); onSelect(m); });
+      }
       wrap.appendChild(b);
     }
   }
@@ -794,7 +807,7 @@ async function renderClientWorkoutTab(content, clientId){
   let currentWeek = Math.min(unlockedThroughWeek, all.totalWeeks);
   let currentDay = 0;
 
-  const monthTabs = buildMonthTabs(all.totalWeeks, unlockedThroughWeek, (m) => { selectMonth(m); });
+  const monthTabs = buildMonthTabs(all.totalWeeks, unlockedThroughWeek, (m) => { selectMonth(m); }, undefined, true);
   content.appendChild(monthTabs.el);
 
   const weekTabsWrap = el(`<div class="week-tabs" style="margin-top:6px;"></div>`);
