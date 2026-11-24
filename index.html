@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
 <title>FitArc</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F1115">
+<link rel="icon" href="/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FitArc">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Oswald:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -96,6 +103,15 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--primary)
 <body>
 <div id="app"></div>
 <script>
+// Register the PWA service worker (app-shell caching only -- never touches
+// /api/* calls, so data is always fetched live). Safe to no-op if the
+// browser doesn't support it or the file 404s for any reason.
+if ('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+
 const app = document.getElementById('app');
 function el(html){ const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; }
 function fmtNum(n){ if (n === '' || n === null || n === undefined) return '—'; return n; }
@@ -120,11 +136,11 @@ function renderConnectionError(retry){
 // ---------------- routing ----------------
 const params = new URLSearchParams(location.search);
 if (params.get('admin') === '1'){
-  const savedPw = sessionStorage.getItem('oc_admin_pw');
+  const savedPw = localStorage.getItem('oc_admin_pw');
   if (savedPw) adminLoginAttempt(savedPw);
   else renderAdminLogin();
 } else {
-  const savedClientId = sessionStorage.getItem('oc_client_id');
+  const savedClientId = localStorage.getItem('oc_client_id');
   if (savedClientId) renderClientView(savedClientId);
   else renderClientLogin();
 }
@@ -132,8 +148,8 @@ if (params.get('admin') === '1'){
 async function adminLoginAttempt(pw){
   try{
     const r = await api('adminLogin', {password: pw});
-    if (r.ok){ sessionStorage.setItem('oc_admin_pw', pw); renderAdminDashboard(pw); }
-    else { sessionStorage.removeItem('oc_admin_pw'); renderAdminLogin(); }
+    if (r.ok){ localStorage.setItem('oc_admin_pw', pw); renderAdminDashboard(pw); }
+    else { localStorage.removeItem('oc_admin_pw'); renderAdminLogin(); }
   } catch(err){ renderConnectionError(() => adminLoginAttempt(pw)); }
 }
 
@@ -158,7 +174,7 @@ function renderClientLogin(msg){
     btn.disabled = true; btn.textContent = 'Logging in...';
     try{
       const r = await api('clientLogin', {loginId});
-      if (r.ok){ sessionStorage.setItem('oc_client_id', r.clientId); renderClientView(r.clientId); }
+      if (r.ok){ localStorage.setItem('oc_client_id', r.clientId); renderClientView(r.clientId); }
       else renderClientLogin('Wrong code, try again');
     } catch(err){ renderConnectionError(() => renderClientLogin()); }
   }
@@ -173,7 +189,7 @@ async function renderClientView(clientId){
   let data;
   try{
     data = await api('getClientPortal', {clientId});
-    if (!data.ok){ sessionStorage.removeItem('oc_client_id'); return renderClientLogin(); }
+    if (!data.ok){ localStorage.removeItem('oc_client_id'); return renderClientLogin(); }
   } catch(err){
     return renderConnectionError(() => renderClientView(clientId));
   }
@@ -181,7 +197,7 @@ async function renderClientView(clientId){
   renderClientPortal(clientId, data);
 }
 
-function clientLogout(){ sessionStorage.removeItem('oc_client_id'); renderClientLogin(); }
+function clientLogout(){ localStorage.removeItem('oc_client_id'); renderClientLogin(); }
 
 function subscriptionCard(data){
   const dClass = data.daysRemaining <= 5 ? 'pill-danger' : (data.daysRemaining <= 10 ? 'pill-warn' : 'pill-ok');
@@ -1076,7 +1092,7 @@ function renderAdminLogin(msg){
     btn.disabled = true; btn.textContent = 'Logging in...';
     try{
       const r = await api('adminLogin', {password: pw});
-      if (r.ok){ sessionStorage.setItem('oc_admin_pw', pw); renderAdminDashboard(pw); }
+      if (r.ok){ localStorage.setItem('oc_admin_pw', pw); renderAdminDashboard(pw); }
       else renderAdminLogin('Wrong password');
     } catch(err){ renderConnectionError(() => renderAdminLogin()); }
   }
@@ -1084,7 +1100,7 @@ function renderAdminLogin(msg){
   input.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 }
 
-function adminLogout(){ sessionStorage.removeItem('oc_admin_pw'); renderAdminLogin(); }
+function adminLogout(){ localStorage.removeItem('oc_admin_pw'); renderAdminLogin(); }
 
 function planLabel(plan){ return plan === 'quarterly' ? 'Quarterly' : 'Monthly'; }
 
@@ -1094,7 +1110,7 @@ async function renderAdminDashboard(pw){
   let clients;
   try{
     const r = await api('listClients', {password: pw});
-    if (!r.ok){ sessionStorage.removeItem('oc_admin_pw'); return renderAdminLogin('Session expired, please log in again.'); }
+    if (!r.ok){ localStorage.removeItem('oc_admin_pw'); return renderAdminLogin('Session expired, please log in again.'); }
     clients = r.clients;
   } catch(err){ return renderConnectionError(() => renderAdminDashboard(pw)); }
 
@@ -1227,7 +1243,7 @@ async function renderClientDetail(pw, clientId){
   let c;
   try{
     const r = await api('getClientDetail', {password: pw, clientId});
-    if (!r.ok){ sessionStorage.removeItem('oc_admin_pw'); return renderAdminLogin('Session expired, please log in again.'); }
+    if (!r.ok){ localStorage.removeItem('oc_admin_pw'); return renderAdminLogin('Session expired, please log in again.'); }
     c = r;
   } catch(err){ return renderConnectionError(() => renderClientDetail(pw, clientId)); }
 
