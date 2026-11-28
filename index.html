@@ -78,6 +78,7 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--primary)
 .scale-btn.sel{background:var(--primary);border-color:var(--primary);color:#fff;}
 .client-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;}
 .client-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;}
+.client-card-inactive{opacity:.6;}
 .client-card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
 .client-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;}
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px;}
@@ -175,6 +176,7 @@ function renderClientLogin(msg){
     try{
       const r = await api('clientLogin', {loginId});
       if (r.ok){ localStorage.setItem('oc_client_id', r.clientId); renderClientView(r.clientId); }
+      else if (r.error === 'inactive') renderClientLogin('Your subscription is paused. Please contact your coach.');
       else renderClientLogin('Wrong code, try again');
     } catch(err){ renderConnectionError(() => renderClientLogin()); }
   }
@@ -189,7 +191,10 @@ async function renderClientView(clientId){
   let data;
   try{
     data = await api('getClientPortal', {clientId});
-    if (!data.ok){ localStorage.removeItem('oc_client_id'); return renderClientLogin(); }
+    if (!data.ok){
+      localStorage.removeItem('oc_client_id');
+      return renderClientLogin(data.error === 'inactive' ? 'Your subscription is paused. Please contact your coach.' : undefined);
+    }
   } catch(err){
     return renderConnectionError(() => renderClientView(clientId));
   }
@@ -750,13 +755,26 @@ const MONTH_LEN = 4;
 function monthAnchorWeek(weekNumber){ return Math.floor((weekNumber - 1) / MONTH_LEN) * MONTH_LEN + 1; }
 function monthNumberOf(weekNumber){ return Math.floor((weekNumber - 1) / MONTH_LEN) + 1; }
 
+// Local-only safety net for unsaved exercise-log typing (weight/reps/notes):
+// in addition to the confirm()-before-discard guard, every keystroke in the
+// day's inputs is mirrored (debounced) into this browser's localStorage,
+// keyed per client+week+day+role (coach vs client never share a key, even if
+// tested on the same device/browser). If the tab/app gets closed before
+// Save is pressed, reopening the same day restores the draft automatically.
+// This never touches the server -- it's purely a per-browser safety net, so
+// it does nothing for a different device/browser, and a successful Save (or
+// an explicitly confirmed discard) clears the key right away.
+function fitarcDraftKey(role, clientId, weekNum, dayIdx){
+  return `fitarc_draft_${role}_${clientId}_w${weekNum}_d${dayIdx}`;
+}
+
 // Builds the "Month 1 / Month 2 / ..." tab row. Months strictly before
 // `defaultMonth` (the month containing the client's currently-active week)
 // collapse behind a "◂ Previous Months" toggle by default -- the current
 // (and any future, already-added) months are shown as normal tabs so the
 // coach can prep ahead. `onSelect(monthNumber)` fires whenever the selection
 // changes, including from clicking a tab inside the collapsed list.
-function buildMonthTabs(totalWeeks, activeWeek, onSelect, initialMonth, restrictFuture){
+function buildMonthTabs(totalWeeks, activeWeek, onSelect, initialMonth, restrictFuture, confirmLeave){
   const totalMonths = Math.max(1, Math.ceil(totalWeeks / MONTH_LEN));
   const defaultMonth = Math.min(monthNumberOf(Math.min(activeWeek, totalWeeks)), totalMonths);
   let selected = (initialMonth && initialMonth >= 1 && initialMonth <= totalMonths) ? initialMonth : defaultMonth;
@@ -774,7 +792,7 @@ function buildMonthTabs(totalWeeks, activeWeek, onSelect, initialMonth, restrict
       if (expanded){
         pastMonths.forEach(m => {
           const b = el(`<button type="button" class="week-tab${m===selected?' active':''}">Month ${m}</button>`);
-          b.addEventListener('click', () => { if (selected===m) return; selected = m; render(); onSelect(m); });
+          b.addEventListener('click', () => { if (selected===m) return; if (confirmLeave && !confirmLeave()) return; selected = m; render(); onSelect(m); });
           wrap.appendChild(b);
         });
       }
@@ -792,7 +810,7 @@ function buildMonthTabs(totalWeeks, activeWeek, onSelect, initialMonth, restrict
         b.disabled = true;
         b.title = "You'll be able to open this month once you reach it";
       } else {
-        b.addEventListener('click', () => { if (selected===m) return; selected = m; render(); onSelect(m); });
+        b.addEventListener('click', () => { if (selected===m) return; if (confirmLeave && !confirmLeave()) return; selected = m; render(); onSelect(m); });
       }
       wrap.appendChild(b);
     }
@@ -822,8 +840,9 @@ async function renderClientWorkoutTab(content, clientId){
   const unlockedThroughWeek = checkinsCount + 1;
   let currentWeek = Math.min(unlockedThroughWeek, all.totalWeeks);
   let currentDay = 0;
+  let dayReadOnly = false; // mirrors renderDayContent's local `readOnly`, kept in sync for the delegated draft-autosave listener below
 
-  const monthTabs = buildMonthTabs(all.totalWeeks, unlockedThroughWeek, (m) => { selectMonth(m); }, undefined, true);
+  const monthTabs = buildMonthTabs(all.totalWeeks, unlockedThroughWeek, (m) => { selectMonth(m); }, undefined, true, () => confirmDiscard());
   content.appendChild(monthTabs.el);
 
   const weekTabsWrap = el(`<div class="week-tabs" style="margin-top:6px;"></div>`);
@@ -841,7 +860,7 @@ async function renderClientWorkoutTab(content, clientId){
         b.disabled = true;
         b.title = "Submit this week's check-in to unlock the next week";
       } else {
-        b.addEventListener('click', () => { currentWeek = w; currentDay = 0; renderWeekTabs(); loadWeek(w); });
+        b.addEventListener('click', () => { if (w === currentWeek) return; if (!confirmDiscard()) return; currentWeek = w; currentDay = 0; renderWeekTabs(); loadWeek(w); });
       }
       weekTabsWrap.appendChild(b);
     }
@@ -860,6 +879,8 @@ async function renderClientWorkoutTab(content, clientId){
   }
   const pastNoticeWrap = el(`<div></div>`);
   content.appendChild(pastNoticeWrap);
+  const draftNoticeWrap = el(`<div></div>`);
+  content.appendChild(draftNoticeWrap);
 
   // day tabs nested under the selected week -- which days exist, and what's
   // in each one, can differ per week since a week's plan can be customized.
@@ -873,6 +894,9 @@ async function renderClientWorkoutTab(content, clientId){
 
   const exWrap = el(`<div class="stack"></div>`);
   content.appendChild(exWrap);
+  // Delegated listener: survives exWrap.innerHTML being replaced on every
+  // day switch, so this is wired up once and covers every day's inputs.
+  exWrap.addEventListener('input', () => saveDraftDebounced());
   const stretchSectionWrap = el(`<div></div>`);
   content.appendChild(stretchSectionWrap);
   const cardioSectionWrap = el(`<div></div>`);
@@ -935,7 +959,7 @@ async function renderClientWorkoutTab(content, clientId){
     dayTabsWrap.innerHTML = '';
     wk.days.forEach((day, i) => {
       const b = el(`<button type="button" class="week-tab${i===currentDay?' active':''}">${day.title}</button>`);
-      b.addEventListener('click', () => { currentDay = i; dayTabsWrap.querySelectorAll('.week-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); renderDayContent(wk); });
+      b.addEventListener('click', () => { if (i === currentDay) return; if (!confirmDiscard()) return; currentDay = i; dayTabsWrap.querySelectorAll('.week-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); renderDayContent(wk); });
       dayTabsWrap.appendChild(b);
     });
   }
@@ -949,6 +973,8 @@ async function renderClientWorkoutTab(content, clientId){
     // unlocked the next one), its logged numbers are frozen -- they can
     // still look back at what they logged, just not change it.
     const readOnly = currentWeek < unlockedThroughWeek;
+    dayReadOnly = readOnly;
+    draftNoticeWrap.innerHTML = '';
     pastNoticeWrap.innerHTML = readOnly
       ? `<p class="field-hint" style="margin-top:-8px;">📖 This week has passed — you can view what you logged, but it's locked from further changes.</p>`
       : '';
@@ -972,20 +998,103 @@ async function renderClientWorkoutTab(content, clientId){
         const row = el(`
           <div class="set-row">
             <span class="set-label">Set ${si+1}</span>
-            <input type="text" inputmode="decimal" placeholder="Weight" class="set-weight" value="${s.weight || ''}" style="max-width:100px;" ${readOnly?'readonly disabled':''}>
-            <input type="text" inputmode="numeric" placeholder="Reps" class="set-reps" value="${s.reps || ''}" style="max-width:90px;" ${readOnly?'readonly disabled':''}>
+            <input type="text" inputmode="decimal" placeholder="Weight" class="set-weight" value="${s.weight || ''}" data-orig="${s.weight || ''}" style="max-width:100px;" ${readOnly?'readonly disabled':''}>
+            <input type="text" inputmode="numeric" placeholder="Reps" class="set-reps" value="${s.reps || ''}" data-orig="${s.reps || ''}" style="max-width:90px;" ${readOnly?'readonly disabled':''}>
           </div>
         `);
         setsArea.appendChild(row);
       });
-      card.appendChild(el(`
+      const noteBlock = el(`
         <div class="stack-sm" style="margin-top:8px;">
           <div class="field-hint">Your notes</div>
-          <textarea class="ex-note" ${readOnly?'readonly':''}>${existingNote}</textarea>
+          <textarea class="ex-note" ${readOnly?'readonly':''}></textarea>
         </div>
-      `));
+      `);
+      const noteEl = noteBlock.querySelector('.ex-note');
+      noteEl.value = existingNote;
+      noteEl.dataset.orig = existingNote;
+      card.appendChild(noteBlock);
       exWrap.appendChild(card);
     });
+    restoreDraftIfAny();
+  }
+
+  function hasUnsavedChanges(){
+    let dirty = false;
+    exWrap.querySelectorAll('.ex-card').forEach(card => {
+      card.querySelectorAll('.set-weight, .set-reps').forEach(inp => {
+        if (inp.value !== (inp.dataset.orig || '')) dirty = true;
+      });
+      const noteInp = card.querySelector('.ex-note');
+      if (noteInp && noteInp.value !== (noteInp.dataset.orig || '')) dirty = true;
+    });
+    return dirty;
+  }
+  function confirmDiscard(){
+    if (!hasUnsavedChanges()) return true;
+    const ok = confirm("You have unsaved changes on this day (numbers or notes). Switch away and discard them?");
+    if (ok) clearDraft(currentWeek, currentDay); // explicitly confirmed discard -- don't let the local draft resurrect this later
+    return ok;
+  }
+
+  // ---- local-only draft autosave (see fitarcDraftKey comment) ----
+  function currentDraftPayload(){
+    const exercises = [];
+    exWrap.querySelectorAll('.ex-card').forEach(card => {
+      const sets = [];
+      card.querySelectorAll('.set-row').forEach(row => {
+        sets.push({ weight: row.querySelector('.set-weight').value, reps: row.querySelector('.set-reps').value });
+      });
+      const noteEl = card.querySelector('.ex-note');
+      exercises.push({ sets, note: noteEl ? noteEl.value : '' });
+    });
+    return { exercises };
+  }
+  let draftSaveTimer = null;
+  function saveDraftDebounced(){
+    if (dayReadOnly) return;
+    clearTimeout(draftSaveTimer);
+    draftSaveTimer = setTimeout(() => {
+      try{
+        if (!hasUnsavedChanges()){ clearDraft(currentWeek, currentDay); return; }
+        localStorage.setItem(fitarcDraftKey('client', clientId, currentWeek, currentDay), JSON.stringify(currentDraftPayload()));
+      } catch(err){}
+    }, 400);
+  }
+  function clearDraft(weekNum, dayNum){
+    try{ localStorage.removeItem(fitarcDraftKey('client', clientId, weekNum, dayNum)); } catch(err){}
+  }
+  function restoreDraftIfAny(){
+    if (dayReadOnly) return;
+    let draft = null;
+    try{
+      const raw = localStorage.getItem(fitarcDraftKey('client', clientId, currentWeek, currentDay));
+      draft = raw ? JSON.parse(raw) : null;
+    } catch(err){ draft = null; }
+    if (!draft || !Array.isArray(draft.exercises)) return;
+    const cards = exWrap.querySelectorAll('.ex-card');
+    let applied = false;
+    cards.forEach((card, i) => {
+      const d = draft.exercises[i];
+      if (!d) return;
+      const weightInps = card.querySelectorAll('.set-weight');
+      const repsInps = card.querySelectorAll('.set-reps');
+      (d.sets || []).forEach((s, si) => {
+        if (weightInps[si] && typeof s.weight === 'string' && weightInps[si].value !== s.weight){ weightInps[si].value = s.weight; applied = true; }
+        if (repsInps[si] && typeof s.reps === 'string' && repsInps[si].value !== s.reps){ repsInps[si].value = s.reps; applied = true; }
+      });
+      const noteInp = card.querySelector('.ex-note');
+      if (noteInp && typeof d.note === 'string' && noteInp.value !== d.note){ noteInp.value = d.note; applied = true; }
+    });
+    if (applied){
+      draftNoticeWrap.innerHTML = `<p class="field-hint" style="margin-top:-4px;">↩️ Restored unsaved changes from before — review and hit Save, or <a href="#" id="discard-draft-link">discard them</a>.</p>`;
+      const link = draftNoticeWrap.querySelector('#discard-draft-link');
+      if (link) link.addEventListener('click', (e) => {
+        e.preventDefault();
+        clearDraft(currentWeek, currentDay);
+        loadWeek(currentWeek);
+      });
+    }
   }
 
   function loadWeek(weekNum){
@@ -1021,6 +1130,10 @@ async function renderClientWorkoutTab(content, clientId){
       if (r.ok){
         if (!all.logsByWeek[currentWeek]) all.logsByWeek[currentWeek] = {};
         all.logsByWeek[currentWeek][currentDay] = r.data;
+        exWrap.querySelectorAll('.set-weight, .set-reps').forEach(inp => { inp.dataset.orig = inp.value; });
+        exWrap.querySelectorAll('.ex-note').forEach(inp => { inp.dataset.orig = inp.value; });
+        clearDraft(currentWeek, currentDay);
+        draftNoticeWrap.innerHTML = '';
         renderProgress();
         saveBtn.textContent = 'Saved ✓'; setTimeout(() => { saveBtn.textContent = 'Save'; saveBtn.disabled = false; }, 1200);
       }
@@ -1135,20 +1248,29 @@ async function renderAdminDashboard(pw){
   clients.forEach(c => {
     const dClass = c.daysRemaining <= 5 ? 'pill-danger' : (c.daysRemaining <= 10 ? 'pill-warn' : 'pill-ok');
     const lastLogText = c.lastWorkoutLog ? `Last log: ${fmtDate(c.lastWorkoutLog)}` : 'No logs yet';
+    const isActive = c.active !== false;
     const card = el(`
-      <div class="client-card" style="cursor:pointer;">
+      <div class="client-card${isActive ? '' : ' client-card-inactive'}" style="cursor:pointer;">
         <div class="client-card-head">
           <h3>${c.name}</h3>
-          <span class="pill ${dClass}">${c.daysRemaining > 0 ? c.daysRemaining + ' days' : 'Expired'}</span>
+          <div class="row" style="gap:6px;">
+            <span class="pill ${isActive ? 'pill-ok' : 'pill-danger'}">${isActive ? '● Active' : '○ Inactive'}</span>
+            <span class="pill ${dClass}">${c.daysRemaining > 0 ? c.daysRemaining + ' days' : 'Expired'}</span>
+          </div>
         </div>
         <p class="field-hint" style="margin:0 0 8px;">${planLabel(c.plan)} · Login ID: ${c.loginId} · ${lastLogText}</p>
         <div class="client-actions">
           <button class="btn btn-outline btn-sm edit-btn">Edit</button>
+          <button class="btn btn-outline btn-sm toggle-active-btn">${isActive ? 'Deactivate' : 'Activate'}</button>
           <button class="btn btn-outline btn-sm delete-btn" style="color:var(--danger);border-color:var(--danger);">Delete</button>
         </div>
       </div>
     `);
     card.querySelector('.edit-btn').addEventListener('click', (e) => { e.stopPropagation(); openEditClientModal(pw, c, () => renderAdminDashboard(pw)); });
+    card.querySelector('.toggle-active-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      confirmToggleClientActive(pw, c.id, c.name, isActive, () => renderAdminDashboard(pw));
+    });
     card.querySelector('.delete-btn').addEventListener('click', (e) => { e.stopPropagation(); confirmDeleteClient(pw, c.id, c.name, () => renderAdminDashboard(pw)); });
     card.addEventListener('click', () => renderClientDetail(pw, c.id));
     grid.appendChild(card);
@@ -1236,6 +1358,21 @@ async function confirmDeleteClient(pw, clientId, name, onDone){
   else alert('Something went wrong, please try again.');
 }
 
+// Manual Deactivate/Activate toggle (e.g. when a client's subscription ends
+// and the coach isn't renewing it yet): deactivating blocks clientLogin AND
+// signs out any already-logged-in session on the client's own device (see
+// getClientPortal in action.js) with a generic "subscription paused" message.
+// It never happens automatically -- only via this explicit coach action.
+async function confirmToggleClientActive(pw, clientId, name, isCurrentlyActive, onDone){
+  const msg = isCurrentlyActive
+    ? `Deactivate "${name}"? They won't be able to log in (or stay logged in) until you activate them again.`
+    : `Activate "${name}" again? They'll be able to log in right away.`;
+  if (!confirm(msg)) return;
+  const r = await api('setClientActive', {password: pw, clientId, active: !isCurrentlyActive});
+  if (r.ok) onDone();
+  else alert('Something went wrong, please try again.');
+}
+
 // ---------------- client detail (admin) ----------------
 async function renderClientDetail(pw, clientId){
   app.innerHTML = '';
@@ -1250,18 +1387,24 @@ async function renderClientDetail(pw, clientId){
   app.innerHTML = '';
   const wrap = el(`<div class="wrap wide"></div>`);
   const dClass = c.daysRemaining <= 5 ? 'pill-danger' : (c.daysRemaining <= 10 ? 'pill-warn' : 'pill-ok');
+  const cIsActive = c.active !== false;
   wrap.appendChild(el(`
     <div class="topbar">
-      <div class="row" style="align-items:center;gap:12px;">
+      <div class="row" style="align-items:center;gap:12px;flex-wrap:wrap;">
         <button class="btn btn-outline btn-sm" id="back-btn">← Back</button>
         <h3 style="margin:0;">${c.name}</h3>
+        <span class="pill ${cIsActive ? 'pill-ok' : 'pill-danger'}">${cIsActive ? '● Active' : '○ Inactive'}</span>
         <span class="pill ${dClass}">${c.daysRemaining > 0 ? c.daysRemaining + ' days left' : 'Expired'}</span>
+        <button class="btn btn-outline btn-sm" id="toggle-active-btn">${cIsActive ? 'Deactivate' : 'Activate'}</button>
       </div>
       <button class="btn btn-outline btn-sm" id="logout-btn">Logout</button>
     </div>
   `));
   wrap.querySelector('#back-btn').addEventListener('click', () => renderAdminDashboard(pw));
   wrap.querySelector('#logout-btn').addEventListener('click', adminLogout);
+  wrap.querySelector('#toggle-active-btn').addEventListener('click', () => {
+    confirmToggleClientActive(pw, clientId, c.name, cIsActive, () => renderClientDetail(pw, clientId));
+  });
 
   wrap.appendChild(el(`
     <div class="tabs">
@@ -1396,6 +1539,7 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
   let currentWeek = (initialWeek && initialWeek >= 1 && initialWeek <= totalWeeks) ? initialWeek : Math.min(activeWeek, totalWeeks);
   let currentDay = 0;
   let weekCache = { 1: week1 };
+  let dayReadOnly = false; // mirrors renderDayContent's local `logLocked`, kept in sync for the delegated draft-autosave listener below
 
   const topRow = el(`
     <div class="row" style="justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
@@ -1441,7 +1585,92 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
     return;
   }
 
-  const monthTabs = buildMonthTabs(totalWeeks, activeWeek, (m) => { selectMonth(m); }, monthNumberOf(currentWeek));
+  // Unsaved-changes guard: switching day/week/month tabs used to silently
+  // throw away whatever the coach had typed into this day's weight/reps
+  // inputs or exercise notes, since those are plain re-rendered from scratch
+  // on every switch. hasUnsavedChanges() compares each input's live value
+  // against the data-orig/data-origCoachNote it was loaded with; anything
+  // that would discard a dirty day first asks for confirmation (same pattern
+  // as the accidental-backdrop-click protection on the plan editors).
+  function hasUnsavedChanges(){
+    let dirty = false;
+    exWrap.querySelectorAll('.ex-card').forEach(card => {
+      const notesEl = card.querySelector('.ex-coach-notes');
+      if (notesEl && notesEl.value !== (card.dataset.origCoachNote || '')) dirty = true;
+      card.querySelectorAll('.set-weight, .set-reps').forEach(inp => {
+        if (inp.value !== (inp.dataset.orig || '')) dirty = true;
+      });
+    });
+    return dirty;
+  }
+  function confirmDiscard(){
+    if (!hasUnsavedChanges()) return true;
+    const ok = confirm("You have unsaved changes on this day (numbers or notes). Switch away and discard them?");
+    if (ok) clearDraft(currentWeek, currentDay); // explicitly confirmed discard -- don't let the local draft resurrect this later
+    return ok;
+  }
+
+  // ---- local-only draft autosave (see fitarcDraftKey comment) ----
+  function currentDraftPayload(){
+    const exercises = [];
+    exWrap.querySelectorAll('.ex-card').forEach(card => {
+      const sets = [];
+      card.querySelectorAll('.set-row').forEach(row => {
+        sets.push({ weight: row.querySelector('.set-weight').value, reps: row.querySelector('.set-reps').value });
+      });
+      const notesEl = card.querySelector('.ex-coach-notes');
+      exercises.push({ sets, coachNote: notesEl ? notesEl.value : '' });
+    });
+    return { exercises };
+  }
+  let draftSaveTimer = null;
+  function saveDraftDebounced(){
+    // note: unlike the client view, a logLocked (past) week still allows the
+    // coach to edit the exercise note, so autosave isn't gated on dayReadOnly here.
+    clearTimeout(draftSaveTimer);
+    draftSaveTimer = setTimeout(() => {
+      try{
+        if (!hasUnsavedChanges()){ clearDraft(currentWeek, currentDay); return; }
+        localStorage.setItem(fitarcDraftKey('admin', clientId, currentWeek, currentDay), JSON.stringify(currentDraftPayload()));
+      } catch(err){}
+    }, 400);
+  }
+  function clearDraft(weekNum, dayNum){
+    try{ localStorage.removeItem(fitarcDraftKey('admin', clientId, weekNum, dayNum)); } catch(err){}
+  }
+  function restoreDraftIfAny(){
+    let draft = null;
+    try{
+      const raw = localStorage.getItem(fitarcDraftKey('admin', clientId, currentWeek, currentDay));
+      draft = raw ? JSON.parse(raw) : null;
+    } catch(err){ draft = null; }
+    if (!draft || !Array.isArray(draft.exercises)) return;
+    const cards = exWrap.querySelectorAll('.ex-card');
+    let applied = false;
+    cards.forEach((card, i) => {
+      const d = draft.exercises[i];
+      if (!d) return;
+      const weightInps = card.querySelectorAll('.set-weight');
+      const repsInps = card.querySelectorAll('.set-reps');
+      (d.sets || []).forEach((s, si) => {
+        if (weightInps[si] && !weightInps[si].disabled && typeof s.weight === 'string' && weightInps[si].value !== s.weight){ weightInps[si].value = s.weight; applied = true; }
+        if (repsInps[si] && !repsInps[si].disabled && typeof s.reps === 'string' && repsInps[si].value !== s.reps){ repsInps[si].value = s.reps; applied = true; }
+      });
+      const notesEl = card.querySelector('.ex-coach-notes');
+      if (notesEl && typeof d.coachNote === 'string' && notesEl.value !== d.coachNote){ notesEl.value = d.coachNote; applied = true; }
+    });
+    if (applied){
+      draftNoticeWrap.innerHTML = `<p class="field-hint" style="margin-top:-4px;">↩️ Restored unsaved changes from before — review and hit Save, or <a href="#" id="discard-draft-link">discard them</a>.</p>`;
+      const link = draftNoticeWrap.querySelector('#discard-draft-link');
+      if (link) link.addEventListener('click', (e) => {
+        e.preventDefault();
+        clearDraft(currentWeek, currentDay);
+        loadWeek(currentWeek);
+      });
+    }
+  }
+
+  const monthTabs = buildMonthTabs(totalWeeks, activeWeek, (m) => { selectMonth(m); }, monthNumberOf(currentWeek), false, confirmDiscard);
   content.appendChild(monthTabs.el);
 
   const weekTabsWrap = el(`<div class="week-tabs" style="margin-top:6px;"></div>`);
@@ -1454,7 +1683,7 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
     for (let w = anchor; w < anchor + MONTH_LEN && w <= totalWeeks; w++){
       const past = w < activeWeek;
       const b = el(`<button type="button" class="week-tab${w===currentWeek?' active':''}">${past ? '📖 ' : ''}Week ${w}</button>`);
-      b.addEventListener('click', () => { currentWeek = w; currentDay = 0; renderWeekTabs(); loadWeek(w); });
+      b.addEventListener('click', () => { if (w === currentWeek) return; if (!confirmDiscard()) return; currentWeek = w; currentDay = 0; renderWeekTabs(); loadWeek(w); });
       weekTabsWrap.appendChild(b);
     }
   }
@@ -1470,6 +1699,8 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
   content.appendChild(monthEmptyWrap);
   const pastNoticeWrap = el(`<div></div>`);
   content.appendChild(pastNoticeWrap);
+  const draftNoticeWrap = el(`<div></div>`);
+  content.appendChild(draftNoticeWrap);
 
   // day tabs nested under the selected week -- which days exist, and what's
   // in each one, can differ per week since a week's plan can be customized.
@@ -1481,6 +1712,9 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
 
   const exWrap = el(`<div class="stack"></div>`);
   content.appendChild(exWrap);
+  // Delegated listener: survives exWrap.innerHTML being replaced on every
+  // day switch, so this is wired up once and covers every day's inputs.
+  exWrap.addEventListener('input', () => saveDraftDebounced());
   const stretchSectionWrap = el(`<div></div>`);
   content.appendChild(stretchSectionWrap);
   const cardioSectionWrap = el(`<div></div>`);
@@ -1545,7 +1779,7 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
     dayTabsWrap.innerHTML = '';
     wk.days.forEach((day, i) => {
       const b = el(`<button type="button" class="week-tab${i===currentDay?' active':''}">${day.title}</button>`);
-      b.addEventListener('click', () => { currentDay = i; dayTabsWrap.querySelectorAll('.week-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); renderDayContent(wk); });
+      b.addEventListener('click', () => { if (i === currentDay) return; if (!confirmDiscard()) return; currentDay = i; dayTabsWrap.querySelectorAll('.week-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); renderDayContent(wk); });
       dayTabsWrap.appendChild(b);
     });
   }
@@ -1559,6 +1793,8 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
     // frozen for the coach too (plan/notes editing is unaffected -- only the
     // sets/reps inputs below get locked).
     const logLocked = currentWeek < activeWeek;
+    dayReadOnly = logLocked;
+    draftNoticeWrap.innerHTML = '';
     pastNoticeWrap.innerHTML = logLocked
       ? `<p class="field-hint" style="margin-top:-8px;">📖 This week has passed — the client's logged numbers are locked. You can still edit the plan/notes.</p>`
       : '';
@@ -1592,13 +1828,14 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
         setsArea.appendChild(el(`
           <div class="set-row">
             <span class="set-label">Set ${si+1}</span>
-            <input type="text" inputmode="decimal" placeholder="Weight" class="set-weight" value="${s.weight || ''}" style="max-width:100px;" ${logLocked?'readonly disabled':''}>
-            <input type="text" inputmode="numeric" placeholder="Reps" class="set-reps" value="${s.reps || ''}" style="max-width:90px;" ${logLocked?'readonly disabled':''}>
+            <input type="text" inputmode="decimal" placeholder="Weight" class="set-weight" value="${s.weight || ''}" data-orig="${s.weight || ''}" style="max-width:100px;" ${logLocked?'readonly disabled':''}>
+            <input type="text" inputmode="numeric" placeholder="Reps" class="set-reps" value="${s.reps || ''}" data-orig="${s.reps || ''}" style="max-width:90px;" ${logLocked?'readonly disabled':''}>
           </div>
         `));
       });
       exWrap.appendChild(card);
     });
+    restoreDraftIfAny();
   }
 
   // Context-aware label for the "Reset" button: Month 1 (and any already-live
@@ -1674,7 +1911,10 @@ async function renderWorkoutAdminTab(content, pw, clientId, totalWeeks, onRefres
           resetPlanBtn.textContent = resetLabelFor(currentWeek, wk);
           exWrap.querySelectorAll('.ex-card').forEach((card, i) => { card.dataset.origCoachNote = coachNotes[i] || ''; });
         }
+        exWrap.querySelectorAll('.set-weight, .set-reps').forEach(inp => { inp.dataset.orig = inp.value; });
       }
+      clearDraft(currentWeek, currentDay);
+      draftNoticeWrap.innerHTML = '';
       progressLoaded = false;
       if (!progressWrap.hidden) await renderProgress();
       saveBtn.textContent = 'Saved ✓'; setTimeout(() => { saveBtn.textContent = 'Save'; saveBtn.disabled = false; }, 1200);
