@@ -95,6 +95,13 @@ async function updateClient(pw, clientId, body) {
   return { ok: true };
 }
 
+async function setClientActive(pw, clientId, active) {
+  if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
+  if (!clientId) return { ok: false, error: 'invalid_id' };
+  await sql`UPDATE clients SET active = ${!!active} WHERE id = ${clientId}`;
+  return { ok: true };
+}
+
 async function deleteClient(pw, clientId) {
   if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
   if (!clientId) return { ok: false, error: 'invalid_id' };
@@ -117,7 +124,7 @@ function subscriptionFields(c) {
 async function listClients(pw) {
   if (!checkPassword(pw)) return { ok: false, error: 'unauthorized' };
   const rows = await sql`
-    SELECT id, login_id AS "loginId", name, phone, drive_link AS "driveLink", plan, start_date, total_weeks, created_at AS "createdAt"
+    SELECT id, login_id AS "loginId", name, phone, drive_link AS "driveLink", plan, start_date, total_weeks, active, created_at AS "createdAt"
     FROM clients ORDER BY created_at DESC
   `;
   const logRows = await sql`SELECT client_id AS "clientId", MAX(updated_at) AS "lastLog" FROM workout_logs GROUP BY client_id`;
@@ -127,7 +134,7 @@ async function listClients(pw) {
     ok: true,
     clients: rows.map(c => ({
       id: c.id, loginId: c.loginId, name: c.name, phone: c.phone, driveLink: c.driveLink || '',
-      createdAt: c.createdAt, lastWorkoutLog: lastLogs[c.id] || null,
+      active: c.active !== false, createdAt: c.createdAt, lastWorkoutLog: lastLogs[c.id] || null,
       ...subscriptionFields(c),
     })),
   };
@@ -147,8 +154,9 @@ async function hasAssessmentOrCheckin(clientId) {
 
 async function clientLogin(loginId) {
   if (!loginId) return { ok: false, error: 'invalid_login_id' };
-  const rows = await sql`SELECT id, name FROM clients WHERE login_id = ${loginId}`;
+  const rows = await sql`SELECT id, name, active FROM clients WHERE login_id = ${loginId}`;
   if (!rows.length) return { ok: false, error: 'invalid_login_id' };
+  if (rows[0].active === false) return { ok: false, error: 'inactive' };
   return { ok: true, clientId: rows[0].id, name: rows[0].name };
 }
 
@@ -156,6 +164,11 @@ async function getClientPortal(clientId) {
   if (!clientId) return { ok: false, error: 'invalid_id' };
   const c = await getClientRow(clientId);
   if (!c) return { ok: false, error: 'invalid_id' };
+  // Re-checked on every portal load (not just at login) so a client already
+  // signed in on their device gets kicked out the moment the coach deactivates
+  // them -- the client-side session id alone (persisted in localStorage since
+  // update 33) is never enough to grant access.
+  if (c.active === false) return { ok: false, error: 'inactive' };
   const has = await hasAssessmentOrCheckin(clientId);
   return {
     ok: true, name: c.name, driveLink: c.drive_link || '', hasAssessment: has,
@@ -171,7 +184,7 @@ async function getClientDetail(pw, clientId) {
   const logRows = await sql`SELECT MAX(updated_at) AS "lastLog" FROM workout_logs WHERE client_id = ${clientId}`;
   return {
     ok: true, id: c.id, loginId: c.login_id, name: c.name, phone: c.phone,
-    driveLink: c.drive_link || '', hasAssessment: has,
+    driveLink: c.drive_link || '', hasAssessment: has, active: c.active !== false,
     lastWorkoutLog: (logRows[0] && logRows[0].lastLog) || null,
     ...subscriptionFields(c),
   };
@@ -935,6 +948,9 @@ module.exports = async (req, res) => {
         break;
       case 'deleteClient':
         out = await deleteClient(body.password, body.clientId);
+        break;
+      case 'setClientActive':
+        out = await setClientActive(body.password, body.clientId, body.active);
         break;
       case 'listClients':
         out = await listClients(body.password);
